@@ -1,0 +1,7 @@
+name: DeepONet
+
+basis_dim: 20
+
+meta:
+  first_order: True
+no_text: False

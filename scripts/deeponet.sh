@@ -1,0 +1,46 @@
+GPU=0
+user=aaa
+
+
+types=(porous_medium conservation_sinflux conservation_cubicflux heat advection burgers  wave inviscid_burgers inviscid_conservation_sinflux inviscid_conservation_cubicflux  diff_bistablereact_1D fplanck  Klein_Gordon diff_linearreact_1D diff_squarelogisticreact_1D cahnhilliard_1D Sine_Gordon kdv diff_logisreact_1D )
+train_type=[advection,conservation_sinflux,diff_bistablereact_1D,fplanck,heat,inviscid_conservation_cubicflux,Klein_Gordon]
+eval_type=[diff_linearreact_1D,inviscid_burgers,burgers,diff_squarelogisticreact_1D,cahnhilliard_1D,conservation_cubicflux,Sine_Gordon,inviscid_conservation_sinflux,kdv,diff_logisreact_1D,porous_medium,wave]
+pre_train_types=( advection conservation_sinflux diff_bistablereact_1D fplanck heat inviscid_conservation_cubicflux Klein_Gordon)
+for type in "${pre_train_types[@]}"
+do
+pre_train=deepo_pret_10000_${type}_nonoise
+#
+CUDA_VISIBLE_DEVICES=$GPU python src/main.py  batch_size_eval=128 exp_name=deeponet exp_id=deepo_pret_10000_${type}_nonoise wandb.id=deepo_pret_10000_${type}_nonoise data.eval_data=onlyqc  data.train_data=onlyqc train_size=10000 train_size_get=10000 eval_size=10000 eval_size_get=10000 batch_size=150 meta=0 model=deeponet data.train_types=${type} data.eval_types=${type} max_epoch=15  zero_shot_only=1 data.input_len=1 data.input_step=1 noise=0
+CUDA_VISIBLE_DEVICES=$GPU python src/main.py  batch_size_eval=128  eval_from_exp=checkpoint/${user}/dumped/deeponet/${pre_train} exp_name=deeponet exp_id=deepo_pret_10000_${type}_nonoise_sameeval wandb.id=deepo_pret_10000_${type}_nonoise_sameeval eval_only=true data.eval_data=onlyqc  data.train_data=onlyqc train_size=10000 train_size_get=10000 eval_size=10000 eval_size_get=10000 batch_size=150 meta=0 model=deeponet data.train_types=${type} data.eval_types=${type} zero_shot_only=1 data.input_len=1 data.input_step=1 noise=0
+#
+#  pre_train=pretrain_10000_${type}
+#  echo "Finetuning $type"
+#  NUMEXPR_MAX_THREADS=12 CUDA_VISIBLE_DEVICES=$GPU python src/main.py batch_size_eval=256 exp_name=deepoft exp_id=lora_64_20_ood_${type} wandb.id=lora_64_20_ood_${type}_TL  data.eval_data=ood_0.3  data.train_data=ood_0.3  reload_model=checkpoint/${user}/dumped/deeponet/${pre_train}/checkpoint.pth  save_periodic=-1 finetune=1 finetune_name=lora lora_r=64 lora_alpha=5 train_size_get=20 eval_size_get=4000 zero_shot_only=1  batch_size=20  n_steps_per_epoch=1  max_epoch=100 log_periodic=1 data.train_types=$type data.eval_types=$type model=deeponet meta=0 data.input_len=1 data.output_start=32 data.input_step=1
+#  NUMEXPR_MAX_THREADS=12 CUDA_VISIBLE_DEVICES=$GPU python src/main.py batch_size_eval=256 exp_name=deepoft exp_id=lora_64_50_ood_${type} wandb.id=lora_64_50_ood_${type}_TL data.eval_data=ood_0.3  data.train_data=ood_0.3  reload_model=checkpoint/${user}/dumped/deeponet/${pre_train}/checkpoint.pth  save_periodic=-1  finetune=1 finetune_name=lora lora_r=64 lora_alpha=5 train_size_get=50 eval_size_get=4000 zero_shot_only=1  batch_size=50  n_steps_per_epoch=1  max_epoch=100 log_periodic=1 data.train_types=$type data.eval_types=$type model=deeponet meta=0 data.input_len=1 data.output_start=32 data.input_step=1
+#  NUMEXPR_MAX_THREADS=12 CUDA_VISIBLE_DEVICES=$GPU python src/main.py batch_size_eval=256 exp_name=deepoft exp_id=lora_64_100_ood_${type} wandb.id=lora_64_100_ood_${type}_TL  data.eval_data=ood_0.3  data.train_data=ood_0.3  reload_model=checkpoint/${user}/dumped/deeponet/${pre_train}/checkpoint.pth  save_periodic=-1   finetune=1 finetune_name=lora lora_r=64 lora_alpha=5 train_size_get=100 eval_size_get=4000 zero_shot_only=1  batch_size=100  n_steps_per_epoch=1  max_epoch=100 log_periodic=1 data.train_types=$type data.eval_types=$type model=deeponet meta=0 data.input_len=1 data.output_start=32 data.input_step=1
+#
+#
+#  NUMEXPR_MAX_THREADS=12 CUDA_VISIBLE_DEVICES=$GPU python src/main.py batch_size_eval=256 exp_name=deepoft exp_id=20ood_${type} wandb.id=20ood_${type}  data.eval_data=ood_0.3  data.train_data=ood_0.3  reload_model=checkpoint/${user}/dumped/deeponet/${pre_train}/checkpoint.pth  save_periodic=-1  finetune=1 finetune_name=reg train_size_get=20 eval_size_get=4000 zero_shot_only=1  batch_size=20  n_steps_per_epoch=1  max_epoch=100 log_periodic=1 data.train_types=$type data.eval_types=$type model=deeponet meta=0 data.input_len=1 data.output_start=32 data.input_step=1
+#  NUMEXPR_MAX_THREADS=12 CUDA_VISIBLE_DEVICES=$GPU python src/main.py batch_size_eval=256 exp_name=deepoft exp_id=50ood_${type} wandb.id=50ood_${type}  data.eval_data=ood_0.3  data.train_data=ood_0.3  reload_model=checkpoint/${user}/dumped/deeponet/${pre_train}/checkpoint.pth save_periodic=-1 finetune=1 finetune_name=reg train_size_get=50 eval_size_get=4000 zero_shot_only=1  batch_size=50  n_steps_per_epoch=1  max_epoch=100 log_periodic=1 data.train_types=$type data.eval_types=$type model=deeponet meta=0 data.input_len=1 data.output_start=32 data.input_step=1
+#  NUMEXPR_MAX_THREADS=12 CUDA_VISIBLE_DEVICES=$GPU python src/main.py batch_size_eval=256 exp_name=deepoft exp_id=100ood_${type} wandb.id=100ood_${type} data.eval_data=ood_0.3  data.train_data=ood_0.3  reload_model=checkpoint/${user}/dumped/deeponet/${pre_train}/checkpoint.pth save_periodic=-1  finetune=1 finetune_name=reg train_size_get=100 eval_size_get=4000 zero_shot_only=1  batch_size=100  n_steps_per_epoch=1  max_epoch=100 log_periodic=1 data.train_types=$type data.eval_types=$type model=deeponet meta=0 data.input_len=1 data.output_start=32 data.input_step=1
+done
+
+ft_types=(diff_linearreact_1D inviscid_burgers burgers diff_squarelogisticreact_1D cahnhilliard_1D conservation_cubicflux Sine_Gordon inviscid_conservation_sinflux kdv diff_logisreact_1D wave porous_medium)
+pre_train_types=( advection conservation_sinflux diff_bistablereact_1D fplanck heat inviscid_conservation_cubicflux Klein_Gordon)
+for pre_type in "${pre_train_types[@]}"
+do
+      pre_train=deepo_pret_10000_${pre_type}_nonoise
+      echo "Finetuning $pre_type"
+#
+      NUMEXPR_MAX_THREADS=12 CUDA_VISIBLE_DEVICES=$GPU python src/main.py batch_size_eval=128 exp_name=deepoft exp_id=ft${pre_type}_ood1_new wandb.id=ft${pre_type}_ood1_new data.eval_data=ood0.3_1  data.train_data=ood0.3_1  reload_model=checkpoint/${user}/dumped/deeponet/${pre_train}/checkpoint.pth save_periodic=-1  finetune=1 finetune_name=reg  zero_shot_only=1 train_size_get=100 train_size=100 eval_size=500 eval_size_get=500  batch_size=100  n_steps_per_epoch=1  max_epoch=100 log_periodic=1 data.train_types=$pre_type data.eval_types=$pre_type model=deeponet meta=0 data.input_len=1 data.input_step=1  data.output_start_eval=63 data.output_start=63 IC_per_param=1024 noise=0
+      NUMEXPR_MAX_THREADS=12 CUDA_VISIBLE_DEVICES=$GPU python src/main.py batch_size_eval=128 exp_name=deepoft exp_id=ft${pre_type}_ood2_new wandb.id=ft${pre_type}_ood2_new data.eval_data=ood0.3_2  data.train_data=ood0.3_2  reload_model=checkpoint/${user}/dumped/deeponet/${pre_train}/checkpoint.pth save_periodic=-1  finetune=1 finetune_name=reg  zero_shot_only=1 train_size_get=100 train_size=100 eval_size=500 eval_size_get=500  batch_size=100  n_steps_per_epoch=1  max_epoch=100 log_periodic=1 data.train_types=$pre_type data.eval_types=$pre_type model=deeponet meta=0 data.input_len=1  data.input_step=1 data.output_start_eval=63 data.output_start=63 IC_per_param=1024 noise=0
+      NUMEXPR_MAX_THREADS=12 CUDA_VISIBLE_DEVICES=$GPU python src/main.py batch_size_eval=128 exp_name=deepoft exp_id=ft${pre_type}_ood3_new wandb.id=ft${pre_type}_ood3_new data.eval_data=ood0.3_3  data.train_data=ood0.3_3  reload_model=checkpoint/${user}/dumped/deeponet/${pre_train}/checkpoint.pth save_periodic=-1  finetune=1 finetune_name=reg  zero_shot_only=1 train_size_get=100 train_size=100 eval_size=500 eval_size_get=500  batch_size=100  n_steps_per_epoch=1  max_epoch=100 log_periodic=1 data.train_types=$pre_type data.eval_types=$pre_type model=deeponet meta=0 data.input_len=1 data.input_step=1  data.output_start_eval=63 data.output_start=63 IC_per_param=1024 noise=0
+
+    for type in "${ft_types[@]}"
+    do
+
+      echo "Finetuning $type"
+      NUMEXPR_MAX_THREADS=12 CUDA_VISIBLE_DEVICES=$GPU python src/main.py batch_size_eval=128 exp_name=deepoft exp_id=${pre_type}_${type} wandb.id=${pre_type}_${type} data.eval_data=onlyqc  data.train_data=onlyqc  reload_model=checkpoint/${user}/dumped/deeponet/${pre_train}/checkpoint.pth save_periodic=-1  finetune=1 finetune_name=reg  zero_shot_only=1 train_size=10000 eval_size=10000 train_size_get=100 eval_size_get=500  batch_size=100  n_steps_per_epoch=1  max_epoch=100 log_periodic=1 data.train_types=$type data.eval_types=$type model=deeponet meta=0 data.input_len=1 data.input_step=1 noise=0
+#      NUMEXPR_MAX_THREADS=12 CUDA_VISIBLE_DEVICES=$GPU python src/main.py batch_size_eval=256 exp_name=evaluate eval_only=1 exp_id=eval_${pre_type}_after_ft_on${type}_deepo wandb.id=eval_${pre_type}_after_ft_on${type}_deepo zero_shot_only=1 data.eval_types=$pre_type  data.eval_data=onlyqc  eval_from_exp=checkpoint/${user}/dumped/deepoft/${pre_type}_${type}_laststep  model=deeponet meta=0 data.input_len=1 data.input_step=1 data.output_start_eval=63 data.output_start=63 noise=0 train_size=10000 train_size_get=1500 eval_size=10000 eval_size_get=10000
+    done
+done

@@ -1,0 +1,11 @@
+name: FNO
+
+hidden_channels: 64
+
+n_modes:
+  - 16
+  - 16
+
+meta:
+  first_order: True
+no_text: False
