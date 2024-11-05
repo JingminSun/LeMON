@@ -13,6 +13,7 @@ min_input_dimension: 1
 min_output_dimension: 1
 max_input_dimension: 1
 max_output_dimension: 1
+random_idx: true
 t_num: 64
 x_num: 128
 t_range:
@@ -23,7 +24,7 @@ x_range:
   - 2
 
 space_dim: 1
-directory: /home/shared/prosepde
+directory: /home/shared/prose/sep_types
 eval_data: null
 train_data: null
 
@@ -54,6 +55,8 @@ heat:
 inviscid_conservation_cubicflux:
   dim: 1
 conservation_cubicflux:
+  dim: 1
+conservation_linearflux:
   dim: 1
 inviscid_conservation_cosflux:
   dim: 1

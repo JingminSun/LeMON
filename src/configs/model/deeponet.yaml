@@ -3,5 +3,10 @@ name: DeepONet
 basis_dim: 20
 
 meta:
+  name: MAML
+  meta_lr: 0.0001
   first_order: True
+  allow_unused: True
+  allow_nograd: True
+  gd_eta: 0
 no_text: False

@@ -399,6 +399,7 @@ class Trainer(object):
                 # logger.info(f"Reached end of dataloader, restart {self.dataloader_count}...")
                 self.data_iter = iter(self.dataloader)
                 batch = next(self.data_iter)
+
             batch_support = {
                 key: value[:self.params.data.num_support] for key, value in batch.items()
             }
@@ -701,11 +702,13 @@ class Trainer(object):
         model.train()
 
         if params.model.name == "DeepONet":
-            assert not params.meta, "Set meta=0 for DeepONet, not implemented"
-            self.deeponet_update(model)
+            # assert not params.meta, "Set meta=0 for DeepONet, not implemented"
+            # self.deeponet_update(model)
+            self.full_meta_deeponet_updates(model) if params.meta else self.deeponet_update(model)
         elif params.model.name == "FNO":
-            assert not params.meta, "Set meta=0 for FNO, not implemented"
-            self.fno_update(model)
+            # assert not params.meta, "Set meta=0 for FNO, not implemented"
+            # self.fno_update(model)
+            self.full_meta_fno_updates(model) if params.meta else self.fno_update(model)
         else:
             if  not params.meta:
 
@@ -779,7 +782,52 @@ class Trainer(object):
 
         # optimize
         self.optimize(data_loss)
+    def full_meta_deeponet_updates(self,model):
+        params = self.params
+        query_data_loss = to_cuda(torch.tensor(0.0).float())
+        for ii in range(params.batch_size_task):
+            samples_support, samples_query = self.get_task()
+            dict_support = self.prepare_data_deepo(
+                samples_support
+            )
+            dict_query = self.prepare_data_deepo(
+                samples_query
+            )
 
+            learner = model.clone()
+            learner = to_cuda(learner)
+
+            for _ in range(params.meta_step):
+                with torch.cuda.amp.autocast(enabled=bool(params.amp), dtype=torch.bfloat16):
+                    output = learner(
+                    querypoint = dict_support["query_tensor_reshaped"],
+                    value_at_sensor= dict_support["data_input_reshaped"],
+                        )
+                    output_start = self.params.data.input_len if self.params.data.output_start is None else self.params.data.output_start
+                    num_output_t = (params.data.t_num - output_start + 1) // self.params.data.output_step
+                    data_output = output.reshape(params.data.num_support, num_output_t, params.data.x_num, 1)
+                    support_data_loss = self.data_loss_fn(data_output, dict_support["data_label"],dict_support["data_mask"],dict_support["loss_weight"])
+
+                learner.adapt(support_data_loss)
+            learner.eval()
+
+            with torch.cuda.amp.autocast(enabled=bool(params.amp), dtype=torch.bfloat16):
+                output = learner(
+                    querypoint=dict_query["query_tensor_reshaped"],
+                    value_at_sensor=dict_query["data_input_reshaped"],
+                )
+                output_start = self.params.data.input_len if self.params.data.output_start is None else self.params.data.output_start
+                num_output_t = (params.data.t_num - output_start + 1) // self.params.data.output_step
+                data_output = output.reshape(params.data.num_query, num_output_t, params.data.x_num, 1)
+                query_data_loss += self.data_loss_fn(data_output, dict_query["data_label"],
+                                                      dict_query["data_mask"], dict_query["loss_weight"])
+
+
+        query_data_loss /= params.batch_size
+        self.data_loss += query_data_loss.item()
+        # optimize
+        self.optimizer.zero_grad()
+        self.optimize(query_data_loss)
     def fno_update(self,model):
         params = self.params
         samples = self.get_batch()
@@ -801,6 +849,48 @@ class Trainer(object):
         # optimize
         self.optimize(data_loss)
 
+
+    def full_meta_fno_updates(self,model):
+        params = self.params
+        query_data_loss = to_cuda(torch.tensor(0.0).float())
+        for ii in range(params.batch_size_task):
+            samples_support, samples_query = self.get_task()
+            dict_support = self.prepare_data(
+                samples_support
+            )
+            dict_query = self.prepare_data(
+                samples_query
+            )
+
+            learner = model.clone()
+            learner = to_cuda(learner)
+
+            for _ in range(params.meta_step):
+                # with torch.cuda.amp.autocast(enabled=bool(params.amp), dtype=torch.bfloat16):
+                output = learner(
+                    dict_support["data_input"],
+                )  # (bs, output_len, x_num, data_dim)
+                output_start = self.params.data.input_len if self.params.data.output_start is None else self.params.data.output_start
+                num_output_t = (params.data.t_num - output_start + 1) // self.params.data.output_step
+                data_output = output.reshape(params.data.num_support, num_output_t, params.data.x_num, 1)
+                support_data_loss = self.data_loss_fn(data_output, dict_support["data_label"], dict_support["data_mask"],dict_support["loss_weight"])
+            learner.adapt(support_data_loss)
+            learner.eval()
+
+            output = learner(
+                dict_query["data_input"],
+            )  # (bs, output_len, x_num, data_dim)
+            output_start = self.params.data.input_len if self.params.data.output_start is None else self.params.data.output_start
+            num_output_t = (params.data.t_num - output_start + 1) // self.params.data.output_step
+            data_output = output.reshape(params.data.num_query, num_output_t, params.data.x_num, 1)
+            query_data_loss += self.data_loss_fn(data_output, dict_query["data_label"], dict_query["data_mask"],dict_query["loss_weight"])
+
+
+        query_data_loss /= params.batch_size
+        self.data_loss += query_data_loss.item()
+        # optimize
+        self.optimizer.zero_grad()
+        self.optimize(query_data_loss)
     # def full_meta_oneupdate(self,params, model, dict_supports, dict_querys, data_loss_fn, to_cuda, ii):
     #     dict_support = dict_supports[ii]
     #     dict_query = dict_querys[ii]

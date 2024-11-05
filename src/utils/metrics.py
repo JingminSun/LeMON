@@ -2,7 +2,7 @@ from collections import defaultdict
 import numpy as np
 import scipy
 import torch
-
+from sklearn.metrics import r2_score
 
 def compute_metrics(output, label, metrics="_mse", batched=False):
     """
@@ -32,6 +32,17 @@ def compute_metrics(output, label, metrics="_mse", batched=False):
             else:
                 mse = torch.sqrt(((output - label) ** 2).mean()).item()
             results[metric] = mse
+
+        elif metric == "_r2":
+            if batched:
+                bs = output.shape[0]
+                output_reshape = output.reshape(bs,-1)
+                label_reshape = label.reshape(bs,-1)
+                r2 =  r2_score(output_reshape.cpu().numpy(),label_reshape.cpu().numpy())
+            else:
+                raise "r2 error has to be computed in a batch"
+            results[metric] = r2
+
 
         elif metric.startswith("_l2_error"):
             if batched:

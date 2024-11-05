@@ -92,10 +92,7 @@ class Evaluator(object):
             params_support.eval_size_get = self.params.eval_support_size * 10
             skip = self.params.train_size
             self.support_datasets: dict = get_dataset(params_support, self.symbol_env, split="eval", skip = skip, meta = False ,mixed_type=self.params.data.mixed_task,support=1)
-            # self.support = {
-            #     k: list(v)[:self.params.eval_support_size]  # Assuming v is iterable and can be sliced
-            #     for k, v in self.support_datasets.items()
-            # }
+
             self.support_iter = {
                 k: iter(DataLoader(
                     v,
@@ -108,20 +105,7 @@ class Evaluator(object):
                 ))
                 for k, v in self.support_datasets.items()
                 }
-        # else:
-        #     self.datasets: dict = get_dataset(self.params, self.symbol_env, split="eval")
-        #     self.dataloaders = {
-        #         k: DataLoader(
-        #             v,
-        #             batch_size=self.params.batch_size_eval,
-        #             num_workers=self.params.num_workers,
-        #             # num_workers=1,
-        #             # pin_memory=True,
-        #             shuffle=True,
-        #             collate_fn=custom_collate(self.params.data.max_output_dimension,symbol_env,self.params.meta),
-        #         )
-        #         for k, v in self.datasets.items()
-        #     }
+
 
         self.types = self.datasets.keys()
 
@@ -151,12 +135,16 @@ class Evaluator(object):
             eval_size = 0
             num_plotted = 0
             results = defaultdict(list)
-            if self.params.model.name == "DeepONet" or  self.params.model.name == "FNO":
-                assert params.zero_shot_only, "only zero shot for deeponet"
+            # if self.params.model.name == "DeepONet" or  self.params.model.name == "FNO":
+            #     assert params.zero_shot_only, "only zero shot for deeponet"
             if not params.zero_shot_only:
                 if params.model.name == "prose_freeze_encoder":
                     learner = self.freeze_adapt_encoder(model,type)
                     learner = Combine_freeze_encoder(model.no_inner_model,learner)
+                elif params.model.name == "DeepONet":
+                    learner = self.deeponet_adapt(model, type)
+                elif params.model.name == "FNO":
+                    learner = self.fno_adapt(model, type)
                 else:
                     learner = self.full_adapt(model,type)
             else:
@@ -170,8 +158,8 @@ class Evaluator(object):
                     )
 
                     data_label = dict["data_label"]
-                    with torch.cuda.amp.autocast(enabled=bool(params.amp), dtype=torch.bfloat16):
-                        if self.params.model.name == "DeepONet":
+                    if self.params.model.name == "DeepONet":
+                        with torch.cuda.amp.autocast(enabled=bool(params.amp), dtype=torch.bfloat16):
                             output = model(
                                 querypoint=dict["query_tensor_reshaped"],
                                 value_at_sensor=dict["data_input_reshaped"],
@@ -179,16 +167,12 @@ class Evaluator(object):
                             output_start = self.params.data.input_len if self.params.data.output_start_eval is None else self.params.data.output_start_eval
                             num_output_t = (params.data.t_num - output_start + 1) // self.params.data.output_step
                             data_output_zero_shot = output.reshape(bs, num_output_t, params.data.x_num, 1)
-                            # # Calculate L2 norm and normalize
-                            # direct_l2 = torch.norm(data_output_zero_shot - dict["data_label"],p=2,dim=(1,2,3)) / torch.norm(dict["data_label"], p=2,dim=(1,2,3))
-                            #
-                            # results["direct_l2"].extend(direct_l2.tolist())
-                            # data_label = dict["data_label_reshaped"].reshape(bs, num_output_t, params.data.x_num, 1)
-                        elif self.params.model.name == "FNO":
-                            data_output_zero_shot = model(
-                                dict["data_input"],
-                            )  # (bs, output_len, x_num, data_dim
-                        else:
+                    elif self.params.model.name == "FNO":
+                        data_output_zero_shot = model(
+                            dict["data_input"],
+                        )  # (bs, output_len, x_num, data_dim
+                    else:
+                        with torch.cuda.amp.autocast(enabled=bool(params.amp), dtype=torch.bfloat16):
                             output_dict_zero_shot = model(
                                 "generate",
                                 data_input=dict["data_input"],
@@ -199,28 +183,44 @@ class Evaluator(object):
                             )  # (bs, output_len, x_num, x_num, data_dim)
                             data_output_zero_shot = output_dict_zero_shot["data_output"]
                             data_output_zero_shot = data_output_zero_shot * dict["data_mask"]
-                        data_loss_zero_shot = data_loss_fn(data_output_zero_shot, data_label,
-                                                           dict["data_mask"], dict["loss_weight"])
-                        results["data_loss_zero_shot"].extend(data_loss_zero_shot)
+                    data_loss_zero_shot = data_loss_fn(data_output_zero_shot, data_label,
+                                                       dict["data_mask"], dict["loss_weight"])
+                    results["data_loss_zero_shot"].extend(data_loss_zero_shot)
 
-                        if not params.zero_shot_only:
-                            output_dict_few_shot = learner(
-                                "generate",
-                                data_input=dict["data_input"],
-                                input_times=dict["input_times"][..., None],
-                                output_times=dict["output_times"][..., None],
-                                symbol_input=dict["symbol_input"],
-                                symbol_padding_mask=dict["symbol_mask"]
-                            )  # (bs, output_len, x_num, x_num, data_dim)
+                    if not params.zero_shot_only:
+                        if self.params.model.name == "DeepONet":
+                            with torch.cuda.amp.autocast(enabled=bool(params.amp), dtype=torch.bfloat16):
+                                output = learner(
+                                    querypoint=dict["query_tensor_reshaped"],
+                                    value_at_sensor=dict["data_input_reshaped"],
+                                )  # (bs, output_len, x_num, data_dim)
+                                output_start = self.params.data.input_len if self.params.data.output_start_eval is None else self.params.data.output_start_eval
+                                num_output_t = (params.data.t_num - output_start + 1) // self.params.data.output_step
+                                data_output_few_shot = output.reshape(bs, num_output_t, params.data.x_num, 1)
+
+                        elif self.params.model.name == "FNO":
+                            data_output_few_shot = learner(
+                                dict["data_input"],
+                            )  # (bs, output_len, x_num, data_dim
+                        else:
+                            with torch.cuda.amp.autocast(enabled=bool(params.amp), dtype=torch.bfloat16):
+                                output_dict_few_shot = learner(
+                                    "generate",
+                                    data_input=dict["data_input"],
+                                    input_times=dict["input_times"][..., None],
+                                    output_times=dict["output_times"][..., None],
+                                    symbol_input=dict["symbol_input"],
+                                    symbol_padding_mask=dict["symbol_mask"]
+                                )  # (bs, output_len, x_num, x_num, data_dim)
 
                             data_output_few_shot = output_dict_few_shot["data_output"]
                             data_output_few_shot = data_output_few_shot * dict["data_mask"]
 
-                            data_loss_few_shot = data_loss_fn(data_output_few_shot, data_label, dict["data_mask"], dict["loss_weight"])
+                        data_loss_few_shot = data_loss_fn(data_output_few_shot, data_label, dict["data_mask"], dict["loss_weight"])
 
-                            results["data_loss_few_shot"].extend(data_loss_few_shot)
-                        else:
-                            data_output_few_shot = None
+                        results["data_loss_few_shot"].extend(data_loss_few_shot)
+                    else:
+                        data_output_few_shot = None
 
                     if self.params.normalize:
                         # denormalize data
@@ -238,7 +238,10 @@ class Evaluator(object):
 
                         for k in cur_result_few_shot.keys():
                             keys = k + "_few_shot"
-                            results[keys].extend(cur_result_few_shot[k])
+                            if k == "_r2":
+                                results[keys].append(cur_result_few_shot[k])
+                            else:
+                                results[keys].extend(cur_result_few_shot[k])
                     else:
                         cur_result_few_shot =None
 
@@ -248,7 +251,10 @@ class Evaluator(object):
 
                     for k in cur_result_zero_shot.keys():
                         keys = k + "_zero_shot"
-                        results[keys].extend(cur_result_zero_shot[k])
+                        if k == "_r2":
+                            results[keys].append(cur_result_zero_shot[k])
+                        else:
+                            results[keys].extend(cur_result_zero_shot[k])
                     if params.print_outputs:
                         # plot all outputs
                         if not params.zero_shot_only:
@@ -338,6 +344,8 @@ class Evaluator(object):
                         break
 
             for k, v in results.items():
+                if k.startswith("_r2"):
+                    results[k] = np.mean(np.array(v))
                 results[k] = np.sum(np.array(v))
             results["size"] = eval_size
             all_results[type] = results
@@ -367,6 +375,9 @@ class Evaluator(object):
                 if k == "size":
                     res_mean_type[k] = v
                     total_size += v
+                elif k.startswith("_r2"):
+                    res_mean_type[k] = v
+                    stats[k] += v / len(self.dataloaders)
                 elif k == "_mse":
                     # rescale mse due to padding dimensions
                     ratio = self.params.data.max_output_dimension / (self.params.data[type.split("%")[0]]).dim
@@ -380,7 +391,7 @@ class Evaluator(object):
                     res_mean_type[k] = v / results["size"]
                     stats[k] += v
             results_per_type[type] = res_mean_type
-        stats = {k: v / total_size for k, v in stats.items()}
+        stats = {k: v if k.startswith("_r2") else v / total_size for k, v in stats.items()}
 
         # report metrics per equation type as a table
         if not params.zero_shot_only:
@@ -413,16 +424,6 @@ class Evaluator(object):
 
     def full_adapt(self,model,type):
         params = self.params
-        # with torch.cuda.amp.autocast(enabled=bool(params.amp),
-        #                              dtype=torch.bfloat16):
-        #     adapt_before = learner(
-        #         "fwd",
-        #         data_input=support_dict["data_input"],
-        #         input_times=support_dict["input_times"][..., None],
-        #         output_times=support_dict["output_times"][..., None],
-        #         symbol_input=support_dict["symbol_input"],
-        #         symbol_padding_mask=support_dict["symbol_mask"]
-        #     )
         param_accumulator = None
         num_inner_loops = params.num_adapt_eval
 
@@ -475,25 +476,7 @@ class Evaluator(object):
                                                                   support_dict[
                                                                       "loss_weight"])
                     learner.adapt(support_data_loss, lr=self.params.model.meta.meta_lr)
-                    # learner.zero_grad()
-                    # support_data_loss.backward(retain_graph= not self.params.model.meta.first_order)
-                    # inner_optimizer.step()
-                    # self.trainer.optimize(support_data_loss, optimizer=inner_optimizer,
-                    #                       outer_loop=False)
-            # learner.eval()
-        # adapt_after = learner(
-        #     "fwd",
-        #     data_input=support_dict["data_input"],
-        #     input_times=support_dict["input_times"][..., None],
-        #     output_times=support_dict["output_times"][..., None],
-        #     symbol_input=support_dict["symbol_input"],
-        #     symbol_padding_mask=support_dict["symbol_mask"]
-        # )
-        # cca_dict = compare_parameters_with_similarity(adapt_before, adapt_after)
-        # logger.info("cca similarity")
-        # for key, value in cca_dict.items():
-        #     logger.info(f"{key}: {value}")
-            # Accumulate parameters after the inner loop
+
             if param_accumulator is None:
                 param_accumulator = {name: torch.zeros_like(param) for name, param in
                                      learner.named_parameters()}
@@ -511,6 +494,125 @@ class Evaluator(object):
             param.data = param_accumulator[name]
         return averaged_model
 
+
+    def deeponet_adapt(self,model,type):
+        params = self.params
+        param_accumulator = None
+        num_inner_loops = params.num_adapt_eval
+
+        for __ in range(num_inner_loops):
+            if params.data.diff_supp_query_type:
+                type_idx = params.data.eval_types_query.index(type)
+                type_support = params.data.eval_types_support[type_idx]
+                support_data = self.support_iter[type_support]
+            else:
+                try:
+                    support_data = next(self.support_iter[type])
+                except:
+                    # logger.info(f"Reached end of dataloader, restart {self.dataloader_count}...")
+                    self.support_iter[type] =  iter(DataLoader(
+                        self.support_datasets[type],
+                        batch_size=self.params.eval_support_size,
+                        num_workers=self.params.num_workers,
+                        # num_workers=1,
+                        # pin_memory=True,
+                        shuffle=True,
+                        collate_fn=custom_collate(self.params.data.max_output_dimension, self.symbol_env)
+                    ))
+                    support_data = next(self.support_iter[type])
+
+            dict_support = self.trainer.prepare_data_deepo(support_data, train=True)
+            learner = model.clone()
+            learner = to_cuda(learner)
+            learner.train()
+            for _ in range(params.meta_step):
+                with torch.cuda.amp.autocast(enabled=bool(params.amp),
+                                             dtype=torch.bfloat16):
+                    output = learner(
+                        querypoint=dict_support["query_tensor_reshaped"],
+                        value_at_sensor=dict_support["data_input_reshaped"],
+                    )
+                    output_start = self.params.data.input_len if self.params.data.output_start is None else self.params.data.output_start
+                    num_output_t = (params.data.t_num - output_start + 1) // self.params.data.output_step
+                    data_output = output.reshape(params.eval_support_size, num_output_t, params.data.x_num, 1)
+                    support_data_loss = self.trainer.data_loss_fn(data_output, dict_support["data_label"],
+                                                          dict_support["data_mask"], dict_support["loss_weight"])
+
+                learner.adapt(support_data_loss, lr=self.params.model.meta.meta_lr)
+            if param_accumulator is None:
+                param_accumulator = {name: torch.zeros_like(param) for name, param in
+                                     learner.named_parameters()}
+
+            for name, param in learner.named_parameters():
+                param_accumulator[name] += param.detach()
+
+        # Calculate mean of accumulated parameters
+        for name in param_accumulator:
+            param_accumulator[name] /= num_inner_loops
+
+        averaged_model = model.clone()
+        # Update model with mean parameters
+        for name, param in averaged_model.named_parameters():
+            param.data = param_accumulator[name]
+        return averaged_model
+    def fno_adapt(self,model,type):
+        params = self.params
+        param_accumulator = None
+        num_inner_loops = params.num_adapt_eval
+
+        for __ in range(num_inner_loops):
+            if params.data.diff_supp_query_type:
+                type_idx = params.data.eval_types_query.index(type)
+                type_support = params.data.eval_types_support[type_idx]
+                support_data = self.support_iter[type_support]
+            else:
+                try:
+                    support_data = next(self.support_iter[type])
+                except:
+                    # logger.info(f"Reached end of dataloader, restart {self.dataloader_count}...")
+                    self.support_iter[type] =  iter(DataLoader(
+                        self.support_datasets[type],
+                        batch_size=self.params.eval_support_size,
+                        num_workers=self.params.num_workers,
+                        # num_workers=1,
+                        # pin_memory=True,
+                        shuffle=True,
+                        collate_fn=custom_collate(self.params.data.max_output_dimension, self.symbol_env)
+                    ))
+                    support_data = next(self.support_iter[type])
+
+            dict_support = self.trainer.prepare_data(support_data, train=True)
+            learner = model.clone()
+            learner = to_cuda(learner)
+            learner.train()
+            for _ in range(params.meta_step):
+
+                output = learner(
+                    dict_support["data_input"],
+                )  # (bs, output_len, x_num, data_dim)
+                output_start = self.params.data.input_len if self.params.data.output_start is None else self.params.data.output_start
+                num_output_t = (params.data.t_num - output_start + 1) // self.params.data.output_step
+                data_output = output.reshape(params.eval_support_size, num_output_t, params.data.x_num, 1)
+                support_data_loss = self.trainer.data_loss_fn(data_output, dict_support["data_label"],
+                                                      dict_support["data_mask"], dict_support["loss_weight"])
+
+                learner.adapt(support_data_loss, lr=self.params.model.meta.meta_lr)
+            if param_accumulator is None:
+                param_accumulator = {name: torch.zeros_like(param) for name, param in
+                                     learner.named_parameters()}
+
+            for name, param in learner.named_parameters():
+                param_accumulator[name] += param.detach()
+
+        # Calculate mean of accumulated parameters
+        for name in param_accumulator:
+            param_accumulator[name] /= num_inner_loops
+
+        averaged_model = model.clone()
+        # Update model with mean parameters
+        for name, param in averaged_model.named_parameters():
+            param.data = param_accumulator[name]
+        return averaged_model
     def freeze_adapt_encoder(self,model,type):
 
 

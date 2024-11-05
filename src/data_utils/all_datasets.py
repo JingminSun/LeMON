@@ -81,7 +81,7 @@ class MultiPDE(Dataset):
         self.directory = params.data.directory
         if self.types == -1:
             self.types = [name for name in os.listdir(self.directory ) if
-             os.path.isdir(os.path.join(self.directory , name)) and "cosflux" not in name]
+             os.path.isdir(os.path.join(self.directory , name)) and "cosflux" not in name  and "linearflux" not in name]
         print(self.types)
         self.num_workers = params.num_workers
         self.local_rank = params.local_rank
@@ -164,7 +164,8 @@ class MultiPDE(Dataset):
         logger.info(f"Loading data from {path} ...")
         with io.open(path, mode="r", encoding="utf-8") as f:
             print("skipping", self.skip)
-            reload_indices = self.rng.choice(range(self.skip, self.skip+self.reload_size), self.get_size,replace=False)
+            reload_indices = self.rng.choice(range(self.skip, self.skip + self.reload_size), self.get_size,
+                                             replace=False)
             sorted_reload_indices = sorted(reload_indices)
 
             # Distribute indices among GPUs
@@ -283,31 +284,14 @@ class MultiPDE_DeepO(MultiPDE):
                     query_locations.append([tt, xx])
 
             query_matrix = torch.tensor(query_locations)
-            # # Create meshgrid of t and x
-            # t_grid, x_grid = torch.meshgrid(t[self.output_start::self.output_step], x)
-            # t_grid = t_grid.flatten()
-            # x_grid = x_grid.flatten()
-            #
-            # # Create the query matrix
-            # query_matrix = torch.stack([t_grid, x_grid], dim=1)
-
-            # for t_indx in range(self.input_len, self.t_num, self.output_step):
-            #     for x_indx in range(self.x_num):
-            #         y = dict()
-            #         y["data_input"] = data_matrix_get[:self.input_len:self.input_step,:]
-            #         y["data_output"] = data_matrix_get[t_indx, x_indx]
-            #         y["query_t"] = t[t_indx]
-            #         y["query_x"] = x[x_indx]
-            #         y["sensors"] = t[:self.input_len:self.input_step]
-
-                    # processed_data.append(y)
 
             # Example of how to create the final y dictionary
             y = {
                 "data": data_matrix_get,
                 "t": t,
                 "x":x,
-                "query": query_matrix
+                "query": query_matrix,
+                "task": task_name
             }
             processed_data.append(y)
 

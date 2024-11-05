@@ -202,7 +202,7 @@ def plot_1d_pde(
     # Slice data for input and target
     input = data_all[:input_len:input_step]
     all = data_all[::output_step]
-    # all[all.shape[0]//2:] = 0
+    all[all.shape[0]//2:] = 0
     input_time = time[:input_len:input_step]
     time = time[::output_step]
 
@@ -245,7 +245,7 @@ def plot_1d_pde(
 def main(params: DictConfig):
     params.zero_shot_only=1
     params.meta=0
-    symbol_env = SymbolicEnvironment(params.symbol)
+    symbol_env = SymbolicEnvironment(params)
 
     init_distributed_mode(params)
 

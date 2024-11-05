@@ -251,7 +251,7 @@ def plot_1d_pde(
 def main(params: DictConfig):
     params.zero_shot_only=1
     params.meta=0
-    symbol_env = SymbolicEnvironment(params.symbol)
+    symbol_env = SymbolicEnvironment(params)
 
     init_distributed_mode(params)
 
@@ -381,7 +381,7 @@ def main(params: DictConfig):
                     data_output_fno, data_label, metrics=params.validation_metrics_print, batched=True
                 )
                 index = idx * params.batch_size_eval
-                plot_title = "Type {} |  LeMON-PROSE $L^2$ error {:.2f} % |  DeepONet $L^2$ error {:.2f} % | |  FNO $L^2$ error {:.2f} % ".format(type.split("%")[0],
+                plot_title = "Type {} |  LeMON-PROSE $L^2$ error {:.2f} % |  DeepONet $L^2$ error {:.2f} %  |  FNO $L^2$ error {:.2f} % ".format(type.split("%")[0],
                                                                           cur_result_prose["_l2_error"][0] * 100,cur_result_deeponet["_l2_error"][0] * 100,cur_result_fno["_l2_error"][0] * 100)
                 path = plot_1d_pde(
                     data_output_prose[0].float().numpy(force=True),

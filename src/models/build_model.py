@@ -113,17 +113,64 @@ def build_model(params, model_config, data_config, symbol_env):
             params.freezedmodule = ["embedder", "data_encoder", "symbol_encoder", "fusion"]
 
     elif name == "DeepONet":
-        modules["model"] = DeepONet(
+        base_model = DeepONet(
             model_config, data_config
         )
+
+        if not params.zero_shot_only:
+            if model_config.meta.name == "MAML":
+                modules["model"] = MAML(base_model,
+                                model_config.meta.meta_lr,
+                                    eta=model_config.meta.gd_eta,
+                                    first_order=model_config.meta.first_order,
+                                    allow_nograd=model_config.meta.allow_nograd,
+                                    allow_unused=model_config.meta.allow_unused)
+            elif model_config.meta.name == "MAMLAdamW":
+                modules["model"] = MAMLAdamW(base_model,
+                                    model_config.meta.meta_lr,
+                                    betas=(0.9, 0.999),
+                                    eps=params.optim.get("eps", 1e-8),
+                                    weight_decay=params.optim.weight_decay,
+                                    first_order=model_config.meta.first_order,
+                                    allow_nograd=model_config.meta.allow_nograd,
+                                    allow_unused=model_config.meta.allow_unused)
+            elif model_config.meta.name == "MetaSGD":
+                modules["model"] = MetaSGD(base_model,
+                                model_config.meta.meta_lr,
+                                    first_order=model_config.meta.first_order)
+        else:
+            modules["model"] = base_model
     elif name == "FNO":
         output_start =  data_config.input_len if data_config.output_start is None else data_config.output_start
         output_start_eval = data_config.input_len if data_config.output_start_eval is None else data_config.output_start_eval
         assert output_start // data_config.output_step == output_start_eval // data_config.output_step
-        modules["model"] = FNO(
+        base_model= FNO(
             n_modes=model_config.n_modes, hidden_channels=model_config.hidden_channels,
             in_channels=int(np.ceil(data_config.input_len / data_config.input_step)) , out_channels= int(np.ceil((data_config.t_num-output_start) / data_config.output_step))
         )
+        if not params.zero_shot_only:
+            if model_config.meta.name == "MAML":
+                modules["model"] = MAML(base_model,
+                                model_config.meta.meta_lr,
+                                    eta=model_config.meta.gd_eta,
+                                    first_order=model_config.meta.first_order,
+                                    allow_nograd=model_config.meta.allow_nograd,
+                                    allow_unused=model_config.meta.allow_unused)
+            elif model_config.meta.name == "MAMLAdamW":
+                modules["model"] = MAMLAdamW(base_model,
+                                    model_config.meta.meta_lr,
+                                    betas=(0.9, 0.999),
+                                    eps=params.optim.get("eps", 1e-8),
+                                    weight_decay=params.optim.weight_decay,
+                                    first_order=model_config.meta.first_order,
+                                    allow_nograd=model_config.meta.allow_nograd,
+                                    allow_unused=model_config.meta.allow_unused)
+            elif model_config.meta.name == "MetaSGD":
+                modules["model"] = MetaSGD(base_model,
+                                model_config.meta.meta_lr,
+                                    first_order=model_config.meta.first_order)
+        else:
+            modules["model"] = base_model
     else:
         assert False, f"Model {name} hasn't been implemented"
 
