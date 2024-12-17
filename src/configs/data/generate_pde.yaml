@@ -35,9 +35,17 @@ conservation_cubicflux:
   dim: 1
 conservation_sinflux:
   dim: 1
+conservation_cosflux:
+  dim: 1
 inviscid_burgers:
   dim: 1
 inviscid_conservation_sinflux:
+  dim: 1
+inviscid_conservation_cosflux:
+  dim: 1
+inviscid_conservation_randomflux:
+  dim: 1
+conservation_randomflux:
   dim: 1
 kdv:
   dim: 1

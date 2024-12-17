@@ -2,7 +2,7 @@ from logging import getLogger
 import torch
 from tabulate import tabulate
 from collections import OrderedDict
-from .transformer_wrappers import  PROSE_1DPDE, Combine_freeze_encoder, PROSE_1DPDE_freeze_encoder,PROSE_1DPDE_inner_data_decoder
+from .transformer_wrappers import  PROSE_1DPDE, Combine_freeze_encoder, PROSE_1DPDE_inner_data,PROSE_1DPDE_freeze_symbol_encoder
 from other_models.deeponet import DeepONet
 from .meta_model import MAML, MetaSGD, MAMLAdamW
 from .finetune_model import assign_linear_lora
@@ -68,6 +68,7 @@ def build_model(params, model_config, data_config, symbol_env):
                                     eta=model_config.meta.gd_eta,
                                     first_order=model_config.meta.first_order,
                                     allow_nograd=model_config.meta.allow_nograd,
+                                    clip_norm=params.clip_grad_norm,
                                     allow_unused=model_config.meta.allow_unused)
             elif model_config.meta.name == "MAMLAdamW":
                 modules["model"] = MAMLAdamW(base_model,
@@ -85,13 +86,13 @@ def build_model(params, model_config, data_config, symbol_env):
         else:
             modules["model"] = base_model
 
-    elif name == "prose_freeze_encoder":
-        no_inner_model = PROSE_1DPDE_freeze_encoder(
+    elif name == "prose_freeze_symbol":
+        no_inner_model = PROSE_1DPDE_freeze_symbol_encoder(
             model_config,
             symbol_env,
             data_config
         )
-        inner_model = PROSE_1DPDE_inner_data_decoder(
+        inner_model = PROSE_1DPDE_inner_data(
             model_config,
             symbol_env,
             data_config
@@ -124,6 +125,7 @@ def build_model(params, model_config, data_config, symbol_env):
                                     eta=model_config.meta.gd_eta,
                                     first_order=model_config.meta.first_order,
                                     allow_nograd=model_config.meta.allow_nograd,
+                                    clip_norm=params.clip_grad_norm,
                                     allow_unused=model_config.meta.allow_unused)
             elif model_config.meta.name == "MAMLAdamW":
                 modules["model"] = MAMLAdamW(base_model,
@@ -155,6 +157,7 @@ def build_model(params, model_config, data_config, symbol_env):
                                     eta=model_config.meta.gd_eta,
                                     first_order=model_config.meta.first_order,
                                     allow_nograd=model_config.meta.allow_nograd,
+                                        clip_norm=params.clip_grad_norm,
                                     allow_unused=model_config.meta.allow_unused)
             elif model_config.meta.name == "MAMLAdamW":
                 modules["model"] = MAMLAdamW(base_model,

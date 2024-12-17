@@ -38,6 +38,7 @@ compile: 0
 # If meta learning or not
 meta: 1
 meta_step: 5
+meta_step_eval: 5
 zero_shot_only: 0
 
 ## FineTune
@@ -46,7 +47,7 @@ finetune_name: lora
 lora_r: 16
 lora_alpha: 0.01
 freezedmodule: null
-
+evalfreezedmodule: null
 ### Training
 
 num_workers: 4

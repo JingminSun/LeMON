@@ -54,6 +54,10 @@ heat:
 
 inviscid_conservation_cubicflux:
   dim: 1
+inviscid_conservation_randomflux:
+  dim: 1
+conservation_randomflux:
+  dim: 1
 conservation_cubicflux:
   dim: 1
 conservation_linearflux:

@@ -63,18 +63,21 @@ def get_dataset(params, symbol_env, split, skip = 0,meta = True, mixed_type= Fal
         if not mixed_type:
             for t in   types:
                 for d in datasets_list:
-                    if params.model.name == "DeepONet":
-                        ds =  MultiPDE_DeepO(params, symbol_env, split = split,types=t,datasets=d, skip=skip)
-                    else:
-                        ds = MultiPDE(params,symbol_env,split = split,types=t,datasets=d, skip= skip)
-                    if datasets_list == [""]:
-                        name = t
-                    else:
-                        if d == "":
+                    try:
+                        if params.model.name == "DeepONet":
+                            ds =  MultiPDE_DeepO(params, symbol_env, split = split,types=t,datasets=d, skip=skip)
+                        else:
+                            ds = MultiPDE(params,symbol_env,split = split,types=t,datasets=d, skip= skip)
+                        if datasets_list == [""]:
                             name = t
                         else:
-                            name = t + "%" + d
-                    datasets[name] = ds
+                            if d == "":
+                                name = t
+                            else:
+                                name = t + "%" + d
+                        datasets[name] = ds
+                    except:
+                        pass
         else:
             assert len(datasets_list)==1, "Only support one dataset for mixed type"
             assert params.model.name != "DeepONet" or params.model.name != "FNO"

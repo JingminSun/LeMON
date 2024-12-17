@@ -39,6 +39,26 @@ def compute_metrics(output, label, metrics="_mse", batched=False):
                 output_reshape = output.reshape(bs,-1)
                 label_reshape = label.reshape(bs,-1)
                 r2 =  r2_score(output_reshape.cpu().numpy(),label_reshape.cpu().numpy())
+                #
+                # output_np = output_reshape.cpu().numpy()
+                # label_np = label_reshape.cpu().numpy()
+                #
+                # # Remove NaNs from both arrays
+                # mask = ~np.isnan(output_np) & ~np.isnan(label_np)  # Only keep indices where both are non-NaN
+                # filtered_output = output_np[mask]
+                # filtered_label = label_np[mask]
+                # clip_min, clip_max = -1e10, 1e10  # Adjust as needed
+                #
+                # # Clip the filtered arrays
+                # filtered_output = np.clip(filtered_output, clip_min, clip_max)
+                # filtered_label = np.clip(filtered_label, clip_min, clip_max)
+                #
+                # #
+                # # Compute R2 score on non-NaN values\
+                # try:
+                #     r2 = r2_score(filtered_label, filtered_output)
+                # except:
+                #     r2 = None
             else:
                 raise "r2 error has to be computed in a batch"
             results[metric] = r2

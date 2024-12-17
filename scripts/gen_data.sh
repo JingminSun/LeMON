@@ -1,18 +1,26 @@
 GPU=1
 ICs_equation=50
-directory="dataset/"
+directory="/home/shared/prose/sep_types"
 
 
+#datasets=(burgers conservation_sinflux conservation_cubicflux inviscid_burgers inviscid_conservation_sinflux inviscid_conservation_cubicflux )
+datasets=( conservation_randomflux inviscid_conservation_randomflux  )
 
-
-datasets=(burgers conservation_sinflux conservation_cubicflux inviscid_burgers inviscid_conservation_sinflux inviscid_conservation_cubicflux advection diff_bistablereact_1D fplanck heat  Klein_Gordon diff_linearreact_1D diff_squarelogisticreact_1D cahnhilliard_1D Sine_Gordon kdv diff_logisreact_1D wave)
+#datasets=(burgers conservation_sinflux conservation_cubicflux inviscid_burgers inviscid_conservation_sinflux inviscid_conservation_cubicflux advection diff_bistablereact_1D fplanck heat  Klein_Gordon diff_linearreact_1D diff_squarelogisticreact_1D cahnhilliard_1D Sine_Gordon kdv diff_logisreact_1D wave)
 for dataset in "${datasets[@]}"; do
     # Cleanup old data to make sure no mismatching of datasize
     ### Data will stored in the following path as well:
     rm $directory/$dataset/${dataset}_$ICs_equation.prefix
     rm $directory/$dataset/${dataset}_${ICs_equation}_data.h5
      ### Generate Basic Data, param range [(1 - data.param_range_gamma)* q_c, (1 + data.param_range_gamma)* q_c] change size if needed, 512K is just a larger enough number that should cover all your needs
-    CUDA_VISIBLE_DEVICES=$GPU python3 src/data_gen_pde.py num_workers=12  IC_per_param=$ICs_equation data.param_range_gamma=0.1 data.types=${dataset}  size=512000 directory=$directory
+    CUDA_VISIBLE_DEVICES=$GPU python3 src/data_gen_pde.py num_workers=12  IC_per_param=$ICs_equation data.param_range_gamma=0.1 data.types=${dataset}  size=51200 directory=$directory
+#
+#    file_name=viscous0.1
+#    rm $directory/$dataset/${dataset}_${ICs_equation}_${file_name}.prefix
+#    rm $directory/$dataset/${dataset}_${ICs_equation}_${file_name}_data.h5
+#     ### Generate Basic Data, param range [(1 - data.param_range_gamma)* q_c, (1 + data.param_range_gamma)* q_c] change size if needed, 512K is just a larger enough number that should cover all your needs
+#    CUDA_VISIBLE_DEVICES=$GPU python3 src/data_gen_pde.py num_workers=12  IC_per_param=$ICs_equation data.param_range_gamma=0.5 data.use_sharedcoeff=true data.types=${dataset}  size=51200 directory=$directory file_name=${file_name}
+
 
 
 

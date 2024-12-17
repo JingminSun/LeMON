@@ -34,10 +34,10 @@ class MultiPDE(Dataset):
             if datasets == "":
                 self.datasets = [""]
             elif isinstance(datasets, (list, ListConfig)):
-                self.datasets = ["_" + a for a in datasets]
+                self.datasets = ["_" + a if a != "reg" else "" for a in datasets]
             else:
                 assert isinstance(datasets, str)
-                self.datasets = ["_" + datasets]
+                self.datasets = ["_" + datasets]  if datasets != "reg" else [""]
         else:
             if self.train:
                 print(params.data.train_data )
@@ -53,10 +53,10 @@ class MultiPDE(Dataset):
                 if params.data.eval_data is None:
                     self.datasets = [""]
                 elif isinstance(params.data.eval_data, (list, ListConfig)):
-                    self.datasets = ["_" + a for a in params.data.eval_data]
+                    self.datasets = ["_" + a if a != "reg" else "" for a in params.data.eval_data]
                 else:
                     assert isinstance(params.data.eval_data, str)
-                    self.datasets = ["_" + params.data.eval_data]
+                    self.datasets = ["_" + params.data.eval_data]  if datasets != "reg" else [""]
 
         if self.train:
             if params.train_size_get > 0:
@@ -164,11 +164,15 @@ class MultiPDE(Dataset):
         logger.info(f"Loading data from {path} ...")
         with io.open(path, mode="r", encoding="utf-8") as f:
             print("skipping", self.skip)
-            reload_indices = self.rng.choice(range(self.skip, self.skip + self.reload_size), self.get_size,
-                                             replace=False)
+            if self.params.data.random_idx:
+                reload_indices = self.rng.choice(range(self.skip, self.skip + self.reload_size), self.get_size,
+                                                 replace=False)
+            else:
+                start = int(np.ceil(self.skip / self.IC_per_param))  # Ensure start is an integer
+                size = self.get_size - self.get_size % self.IC_per_param
+                reload_indices = np.arange(start, start + size, dtype=int)
             sorted_reload_indices = sorted(reload_indices)
-
-            # Distribute indices among GPUs
+                # Distribute indices among GPUs
             # Each GPU gets a slice of the sorted indices array, spaced by the number of GPUs
             local_indices = sorted_reload_indices[self.local_rank::self.n_gpu_per_node]
 
@@ -278,12 +282,12 @@ class MultiPDE_DeepO(MultiPDE):
             dx = (self.x_range[1] -self.x_range[0])/self.x_num
             x = torch.from_numpy(np.linspace(self.x_range[0],self.x_range[1], self.x_num +1)[:-1] + 0.5 * dx).float()
 
-            query_locations = []
-            for tt in t[self.output_start::self.output_step]:
-                for xx in x:
-                    query_locations.append([tt, xx])
+            # query_locations = []
+            # for tt in t[self.output_start::self.output_step]:
+            #     for xx in x:
+            #         query_locations.append([tt, xx])
 
-            query_matrix = torch.tensor(query_locations)
+            query_matrix = t[self.output_start::self.output_step]
 
             # Example of how to create the final y dictionary
             y = {

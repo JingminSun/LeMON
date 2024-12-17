@@ -59,7 +59,7 @@ class mesh(nn.Module):
         bo_b = True
         bo_last = False
 
-        self.l3 = nn.Linear(2, 100, bias=bo_b)
+        self.l3 = nn.Linear(1, 100, bias=bo_b)
         self.l4 = nn.Linear(100, 100, bias=bo_b)
         self.l5 = nn.Linear(100, 100, bias=bo_b)
         self.l6 = nn.Linear(100, 100, bias=bo_b)
@@ -86,22 +86,35 @@ class DeepONet(nn.Module):
         self.input_dim = data_config.x_num
         self.num_sensors = data_config.input_len //data_config.input_step
         self.dim_output_space_basis = model_config.basis_dim
-        self.output_dim = 1
+        self.output_dim = data_config.x_num
 
         # self.toplayer = nn.ModuleList(
         #     [node(self.dim_output_space_basis, self.num_sensors) for _ in range(self.input_dim)])
-        self.top = node(self.dim_output_space_basis,self.num_sensors * self.input_dim,1)
+        self.top = node(self.dim_output_space_basis,self.num_sensors * self.input_dim, self.output_dim)
 
-        self.bottom = mesh(self.dim_output_space_basis, self.output_dim)
+        self.bottom = mesh(self.dim_output_space_basis, 1)
 
     def forward(self, querypoint, value_at_sensor):
+
+
         querypoint = self.bottom(querypoint)
         value_at_sensor = value_at_sensor.view(-1,1,self.num_sensors * self.input_dim)
         k1 = self.top(value_at_sensor)
-        k1 = k1.view(-1, self.dim_output_space_basis, 1)
-        output = torch.bmm(querypoint, k1)
+        k1 = k1.view(-1, self.dim_output_space_basis, self.output_dim)
+        # output = torch.bmm(querypoint, k1)
+        #
+        # # e = torch.bmm(w ,k)
+        # # e =  e[:, :, 0]
+        # return output
+        output = 0
+        for i in range( self.output_dim):
 
+            k = k1[...,i:i+1]
+            e = torch.bmm(querypoint, k)
+            if i == 0:
+                output = e
+            else:
+                output =  torch.cat([output, e], dim=-1)
         # e = torch.bmm(w ,k)
         # e =  e[:, :, 0]
         return output
-

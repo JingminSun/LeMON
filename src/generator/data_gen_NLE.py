@@ -523,8 +523,27 @@ def burgers_f(
             fL = k * jnp.cos(uL)
             fR = k * jnp.cos(uR)
         else:
-            raise NotImplementedError
-
+            assert isinstance(fluxx,tuple)
+            fL = 0
+            fR = 0
+            for flux in fluxx:
+                if flux == "quadratic":
+                    fL += k * 0.5 * uL ** 2
+                    fR += k * 0.5 * uR ** 2
+                elif flux == "linear":
+                    fL += k * uL
+                    fR += k * uR
+                elif flux == "cubic":
+                    fL += k * uL ** 3 / 3
+                    fR += k * uR ** 3 / 3
+                elif flux == "sin":
+                    fL += k * jnp.sin(uL)
+                    fR += k * jnp.sin(uR)
+                elif flux == "cos":
+                    fL += k * jnp.cos(uL)
+                    fR += k * jnp.cos(uR)
+                else:
+                    raise "Wrong flux"
         # upwind advection scheme
         f_upwd = 0.5 * (
             fR[1 : nx + 2]

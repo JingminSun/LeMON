@@ -8,7 +8,7 @@ n_modes:
 
 meta:
   name: MAML
-  meta_lr: 0.0001
+  meta_lr: 0.1
   first_order: True
   allow_unused: True
   allow_nograd: True

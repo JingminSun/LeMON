@@ -14,7 +14,7 @@ from omegaconf import DictConfig, OmegaConf
 import hydra
 
 from trainer import Trainer
-from evaluate import Evaluator
+from evaluate_new import Evaluator
 
 torch.multiprocessing.set_sharing_strategy("file_system")
 
@@ -116,9 +116,9 @@ def main(params: DictConfig):
     evaluator = Evaluator(trainer, symbol_env)
 
     if params.eval_only:
-        stats, _ = evaluator.evaluate()
+        stats, results_per_type = evaluator.evaluate()
         logger.info(
-            "Eval Zero Shot| data loss = {:.8f} | rel l2 = {:.8f} | rel l2 1st_half = {:.8f} | rel l2 2nd_half = {:.8f} | r2 score = {:.8f}".format(
+            "Eval Zero Shot| data loss = {:.8f} | rel l2 = {:.8f} | rel l2 1st_half = {:.8f} | rel l2 2nd_half = {:.8f}| r2 = {:8f}".format(
                 stats["data_loss_zero_shot"],
                 stats["_l2_error_zero_shot"],
                 stats["_l2_error_first_half_zero_shot"],
@@ -127,21 +127,38 @@ def main(params: DictConfig):
             )
         )
         if not params.zero_shot_only:
+            #
+            # try:
+            #     r2_few_shot =  stats["_r2_few_shot"]
+            # except:
+            #     r2_few_shot = "N/A"
             logger.info(
-                "Eval Few Shot| data loss = {:.8f} | rel l2 = {:.8f} | rel l2 1st_half = {:.8f} | rel l2 2nd_half = {:.8f} | r2 score = {:.8f}".format(
+                "Eval Few Shot| data loss = {:.8f} | rel l2 = {:.8f} | rel l2 1st_half = {:.8f} | rel l2 2nd_half = {:.8f} ".format(
                     stats["data_loss_few_shot"],
                     stats["_l2_error_few_shot"],
                     stats["_l2_error_first_half_few_shot"],
                     stats["_l2_error_second_half_few_shot"],
-                    stats["_r2_few_shot"]
+                    # stats["_r2_few_shot"]
                 )
             )
+
+        if params.use_wandb:
+            stats["epoch"] = trainer.epoch
+            wandb_log = {"val": {k.strip("_"): v for k, v in stats.items()}}
+            if params.wandb.log_per_type:
+                for type, results in results_per_type.items():
+                    wandb_log["val"][type] = {
+                        k.strip("_"): v for k, v in results.items() if k in ["_l2_error_zero_shot", "data_loss_zero_shot","_l2_error_few_shot", "data_loss_few_shot"]
+                    }
+            wandb.log(wandb_log)
+
         max_mem = torch.cuda.max_memory_allocated() / 1024**2
         s_mem = " MEM: {:.2f} MB ".format(max_mem)
         logger.info(s_mem)
         exit()
 
-    for epoch in range(params.max_epoch):
+
+    while trainer.epoch < params.max_epoch:
         logger.info(f"============ Starting epoch {trainer.epoch} ... ============")
 
         trainer.inner_epoch = 0
@@ -166,24 +183,24 @@ def main(params: DictConfig):
         stats, results_per_type = evaluator.evaluate()
 
         logger.info(
-            "Epoch {} Eval  Zero Shot | data loss = {:.8f} | rel l2 = {:.8f} | rel l2 1st_half = {:.8f} | rel l2 2nd_half = {:.8f} | r2 score = {:.8f}".format(
+            "Epoch {} Eval  Zero Shot | data loss = {:.8f} | rel l2 = {:.8f} | rel l2 1st_half = {:.8f} | rel l2 2nd_half = {:.8f} ".format(
                 trainer.epoch,
                 stats["data_loss_zero_shot"],
                 stats["_l2_error_zero_shot"],
                 stats["_l2_error_first_half_zero_shot"],
                 stats["_l2_error_second_half_zero_shot"],
-                stats["_r2_zero_shot"]
+                # stats["_r2_zero_shot"]
             )
         )
         if not params.zero_shot_only:
             logger.info(
-                "Epoch {} Eval  Few Shot | data loss = {:.8f} | rel l2 = {:.8f} | rel l2 1st_half = {:.8f} | rel l2 2nd_half = {:.8f} | r2 score = {:.8f}".format(
+                "Epoch {} Eval  Few Shot | data loss = {:.8f} | rel l2 = {:.8f} | rel l2 1st_half = {:.8f} | rel l2 2nd_half = {:.8f} ".format(
                     trainer.epoch,
                     stats["data_loss_few_shot"],
                     stats["_l2_error_few_shot"],
                     stats["_l2_error_first_half_few_shot"],
                     stats["_l2_error_second_half_few_shot"],
-                    stats["_r2_few_shot"]
+                    # stats["_r2_few_shot"]
                 )
             )
         if params.use_wandb:

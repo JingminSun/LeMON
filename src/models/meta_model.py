@@ -29,15 +29,17 @@ class MAML(MetaLearner):
     def __init__(self,
                  module,
                  lr,
-                 eta = 0.1,
+                 eta = 0,
                  first_order=False,
                  allow_unused=None,
+                 clip_norm = 0,
                  allow_nograd=False):
         super().__init__(module)
         self.lr = lr
         self.eta = eta
         self.first_order = first_order
         self.allow_nograd = allow_nograd
+        self.clip_norm = clip_norm
         if allow_unused is None:
             allow_unused = allow_nograd
         self.allow_unused = allow_unused
@@ -183,6 +185,9 @@ class MAML(MetaLearner):
                 msg += str(len(params)) + ' vs ' + str(len(grads)) + ')'
                 print(msg)
             for p, g in zip(params, grads):
+                if self.clip_norm> 0:
+                    g = g.clamp(min=-self.clip_norm,
+                                      max=self.clip_norm)
                 if g is not None:
                     if self.eta ==0:
                         p.update = - lr * g

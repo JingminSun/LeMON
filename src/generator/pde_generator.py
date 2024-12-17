@@ -95,10 +95,12 @@ class PDEGenerator(Generator):
             "conservation_sinflux":self.t_range,
             "conservation_cosflux": self.t_range,
             "conservation_cubicflux":self.t_range,
+            "conservation_randomflux": self.t_range,
             "inviscid_burgers":self.t_range,
             "inviscid_conservation_sinflux":self.t_range,
             "inviscid_conservation_cosflux": self.t_range,
             "inviscid_conservation_cubicflux":self.t_range,
+            "inviscid_conservation_randomflux": self.t_range,
             "cahnhilliard_1D":.5,
             "wave":1,
             "Klein_Gordon":1,
@@ -120,11 +122,13 @@ class PDEGenerator(Generator):
             "conservation_sinflux": 1,
             "conservation_cosflux": 1,
             "conservation_cubicflux": 1,
+            "conservation_randomflux":1,
             "inviscid_burgers": 1,
             "inviscid_conservation_linearflux": 1,
             "inviscid_conservation_sinflux": 1,
             "inviscid_conservation_cosflux": 1,
             "inviscid_conservation_cubicflux": 1,
+            "inviscid_conservation_randomflux": 1,
             "porous_medium": 1,
             "Klein_Gordon": 1,
             "Sine_Gordon": 1,
@@ -258,7 +262,7 @@ class PDEGenerator(Generator):
                     #     self.shared_diff_coeff = .01
                     # else:
                     #
-                    self.shared_diff_coeff = 3e-3
+                    self.shared_diff_coeff = 0.1
                     c1_range = self.get_sample_range(self.shared_diff_coeff)
                     self.shared_diff_coeff = self.refine_floats(rng.uniform(*c1_range, (1,)))[0]
 
@@ -2970,16 +2974,9 @@ class PDEGenerator(Generator):
             numbers = num_initial_points * 10
             ends = rng.uniform(p.data.IC_jump_start,p.data.IC_jump_end, (numbers, 2))
             ends = np.sort(ends, axis=1)
-            # ends = np.arccos(ends)
-            # neg_cos_ends = -np.cos(ends)
-            # sort_indices = np.argsort(neg_cos_ends, axis=1)
-            # ends = np.array([row[indices] for row, indices in zip(ends, sort_indices)])
             breakmid = rng.uniform(self.x_range * 0.2, self.x_range * 0.8, (numbers,))
             GivenIC = []
             for i in range(numbers):
-                # distance_from_midpoint = self.x_grid.flatten() - breakmid[i]
-                # scaled_distance = distance_from_midpoint/(0.1 *self.x_range)
-                # smooth_transition = (jnp.tanh(scaled_distance) + 1) / 2
                 thisIC = ends[i, 0] * (self.x_grid.flatten() < breakmid[i]) + ends[i, 1] * (
                             self.x_grid.flatten() >= breakmid[i])
                 # slope = thisIC[-1]  - thisIC[0]
@@ -3485,6 +3482,244 @@ class PDEGenerator(Generator):
         #     plt.plot(this_sample[0, :])
         #     plt.show()
         #     plt.close()
+
+        return item
+
+    def generate_conservation_randomflux(self, rng, ICs=None,coeff=None):
+        p = self.params
+        if coeff is not None:
+            eps = coeff[0] * np.pi
+            k = coeff[1]
+        else:
+            # if p.extrapolate_pdetypes:
+            #     eps = .03
+            # else:
+            eps = 0.01  # .05
+            if self.IC_types.startswith("rarefaction") or self.IC_types == "one_shock" or self.IC_types == "two_shocks":
+                k=-1
+            else:
+                k =1
+
+            eps_range = self.get_sample_range(eps)
+            k_range = self.get_sample_range(k)
+
+            eps = self.refine_floats(rng.uniform(*eps_range, (1,)))[0]
+            k = self.refine_floats(rng.uniform(*k_range, (1,)))[0]
+
+        item = {"type": "conservation_randomflux"}
+
+
+        tf = self.tfinals["conservation_randomflux"]
+        coeff = self.t_range/tf
+
+        flux_terms = ["sin","cos", "quadratic", "cubic"]
+        num_flux = rng.randint(2,5)
+
+        # Randomly select num_flux terms from flux_terms
+        flux_terms = tuple(rng.choice(flux_terms, num_flux, replace=False).tolist())
+
+        op_list = []
+        term_list = [self.mul_terms([str(coeff), "ut_0"])]
+
+
+        for flux in flux_terms:
+            if flux == "sin":
+                op_list.append("add")
+                term_list.append(Node("mul", p, [Node(str(k), p), Node("mul", p, [Node("cos", p, [Node("u_0", p)]), Node("ux_0", p)])]))
+            elif flux == "cos":
+                op_list.append("sub")
+                term_list.append( Node("mul", p, [Node(str(k), p), Node("mul", p, [Node("sin", p, [Node("u_0", p)]), Node("ux_0", p)])]))
+            elif flux == "quadratic":
+                op_list.append("add")
+                term_list.append(self.mul_terms([str(k), "u_0", "ux_0"]))
+            elif flux == "cubic":
+                op_list.append("add")
+                term_list.append(self.mul_terms([str(k), "u_0", "u_0", "ux_0"]))
+            else:
+                raise "Unknown flux"
+        op_list.append("sub")
+        term_list.append(self.mul_terms([str(eps / np.pi), "uxx_0"]))
+        op_list = [op_list]
+        term_list = [term_list]
+        # op_list = [["sub", "sub"]]
+        # term_list = [
+        #     [
+        #         self.mul_terms([str(coeff), "ut_0"]),
+        #         Node("mul", p, [Node(str(k), p), Node("mul", p, [Node("sin", p, [Node("u_0", p)]), Node("ux_0", p)])]),
+        #         self.mul_terms([str(eps / np.pi), "uxx_0"]),
+        #     ]
+        # ]
+
+        item["tree"] = self.tree_from_list(op_list, term_list)
+
+        num_initial_points = self.ICs_per_equation
+        CFL = 0.4
+
+        if ICs is not None:
+            GivenIC = ICs
+            IC_train = True
+            mode = "periodic"
+            numbers = jnp.shape(ICs)[0]
+        elif self.IC_types == "train":
+            IC_train = True
+            GivenIC = None
+            numbers = num_initial_points * 10
+            mode = "periodic"
+        else:
+            IC_train = False
+            GivenIC = None
+            numbers = num_initial_points * 10
+            mode = "periodic"
+        uu = burgers_f(
+            self.x_range,
+            0.0,
+            self.x_num,
+            0.0,
+            self.t_range / coeff,
+            self.dt / coeff,
+            self.t_num,
+            CFL,
+            numbers,
+            20,
+            rng.randint(100000),
+            eps,
+            k,
+            fluxx=flux_terms,
+            IC_train=IC_train,
+            GivenIC=GivenIC,
+            mode=mode
+        )
+        try:
+            res = []
+            res_np = []
+            for i in range(uu.shape[1]):
+                sample = np.array(jnp.transpose(uu[:, i, :, :], axes=(1, 2, 0)))
+                if np.linalg.norm(sample) < 2000 and np.linalg.norm(sample) > 10:
+                    res.append(torch.tensor(sample))
+                    res_np.append(sample)
+
+                if len(res) >= num_initial_points:
+                    break
+        except Exception as e:
+            pass
+
+        item["data"] = res
+        item["t_grid"] = self.t_eval
+        item["t_span"] = self.t_span
+        item["x_grid"] = self.x_grid
+
+        return item
+
+    def generate_inviscid_conservation_randomflux(self, rng, ICs=None,coeff=None):
+        p = self.params
+        if coeff is not None:
+            # eps = coeff[0] * np.pi
+            k = coeff[1]
+        else:
+
+            if self.IC_types.startswith("rarefaction") or self.IC_types == "one_shock" or self.IC_types == "two_shocks":
+                k=-1
+            else:
+                k =1
+
+            # eps_range = self.get_sample_range(eps)
+            k_range = self.get_sample_range(k)
+
+            # eps = self.refine_floats(rng.uniform(*eps_range, (1,)))[0]
+            k = self.refine_floats(rng.uniform(*k_range, (1,)))[0]
+
+        item = {"type": "inviscid_conservation_randomflux"}
+
+
+        tf = self.tfinals["inviscid_conservation_randomflux"]
+        coeff = self.t_range/tf
+
+        flux_terms = ["sin","cos", "quadratic", "cubic"]
+        num_flux = rng.randint(2,5)
+
+        # Randomly select num_flux terms from flux_terms
+        flux_terms = tuple(rng.choice(flux_terms, num_flux, replace=False).tolist())
+
+        op_list = []
+        term_list = [self.mul_terms([str(coeff), "ut_0"])]
+
+
+        for flux in flux_terms:
+            if flux == "sin":
+                op_list.append("add")
+                term_list.append(Node("mul", p, [Node(str(k), p), Node("mul", p, [Node("cos", p, [Node("u_0", p)]), Node("ux_0", p)])]))
+            elif flux == "cos":
+                op_list.append("sub")
+                term_list.append( Node("mul", p, [Node(str(k), p), Node("mul", p, [Node("sin", p, [Node("u_0", p)]), Node("ux_0", p)])]))
+            elif flux == "quadratic":
+                op_list.append("add")
+                term_list.append(self.mul_terms([str(k), "u_0", "ux_0"]))
+            elif flux == "cubic":
+                op_list.append("add")
+                term_list.append(self.mul_terms([str(k), "u_0", "u_0", "ux_0"]))
+            else:
+                raise "Unknown flux"
+
+        op_list = [op_list]
+        term_list = [term_list]
+        item["tree"] = self.tree_from_list(op_list, term_list)
+
+        num_initial_points = self.ICs_per_equation
+        CFL = 0.4
+
+        if ICs is not None:
+            GivenIC = ICs
+            IC_train = True
+            mode = "periodic"
+            numbers = jnp.shape(ICs)[0]
+        elif self.IC_types == "train":
+            IC_train = True
+            GivenIC = None
+            numbers = num_initial_points * 10
+            mode = "periodic"
+        else:
+            IC_train = False
+            GivenIC = None
+            numbers = num_initial_points * 10
+            mode = "periodic"
+        uu = burgers_f(
+            self.x_range,
+            0.0,
+            self.x_num,
+            0.0,
+            self.t_range / coeff,
+            self.dt / coeff,
+            self.t_num,
+            CFL,
+            numbers,
+            20,
+            rng.randint(100000),
+            0,
+            k,
+            viscous=False,
+            fluxx =flux_terms,
+            IC_train=IC_train,
+            GivenIC=GivenIC,
+            mode=mode
+        )
+        try:
+            res = []
+            res_np = []
+            for i in range(uu.shape[1]):
+                sample = np.array(jnp.transpose(uu[:, i, :, :], axes=(1, 2, 0)))
+                if np.linalg.norm(sample) < 2000 and np.linalg.norm(sample) > 10:
+                    res.append(torch.tensor(sample))
+                    res_np.append(sample)
+
+                if len(res) >= num_initial_points:
+                    break
+        except Exception as e:
+            pass
+
+        item["data"] = res
+        item["t_grid"] = self.t_eval
+        item["t_span"] = self.t_span
+        item["x_grid"] = self.x_grid
 
         return item
 

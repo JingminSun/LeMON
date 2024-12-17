@@ -66,12 +66,12 @@ class Evaluator(object):
                 base_skip = 0
             else:
                 base_skip = self.params.eval_support_size * 20
-            self.skip =  base_skip+self.params.train_size*2 if self.params.meta else  base_skip+self.params.train_size
+            self.skip =  base_skip+self.params.train_size#*2 if self.params.meta else  base_skip+self.params.train_size
         self.datasets: dict = get_dataset(self.params, self.symbol_env, split="eval", skip = self.skip)
         self.dataloaders = {
             k: DataLoader(
                 v,
-                batch_size=self.params.IC_per_param,
+                batch_size=self.params.IC_per_param if not self.params.zero_shot_only else self.params.batch_size_eval,
                 num_workers=self.params.num_workers,
                 # num_workers=1,
                 # pin_memory=True,
@@ -117,22 +117,55 @@ class Evaluator(object):
             for idx, samples in enumerate(loader):
                 bs = len(samples["data"])
                 eval_size += bs
-                dict = (
-                     self.trainer.prepare_data_deepo(samples,train=False) if self.params.model.name == "DeepONet" else self.trainer.prepare_data(samples,train=False)
-                )
 
-                # Initialize empty dictionaries for the 20-sample and 10-sample subsets
-                dict_query = {}
-                dict_support = {}
+                total_samples = bs
+                random_indices = self.datasets[type].rng.permutation(total_samples)
+                support_indices = random_indices[:self.params.data.num_support]
+                query_indices = random_indices[
+                                self.params.data.num_support:self.params.data.num_support + self.params.data.num_query]
+                if not self.params.zero_shot_only:
+                    samples_support = {}
+                    samples_query = {}
+                    for key, value in samples.items():
+                        if isinstance(value, torch.Tensor):
+                            # If `value` is a tensor, use direct indexing
+                            samples_support[key] = value[support_indices]
+                            samples_query[key] = value[query_indices]
+                        elif isinstance(value, np.ndarray):
+                            # If `value` is a numpy array, use direct indexing
+                            samples_support[key] = value[support_indices]
+                            samples_query[key] = value[query_indices]
+                        elif isinstance(value, list):
+                            # If `value` is a list, convert to array for indexing and then back to list
+                            samples_support[key] = [value[i] for i in support_indices]
+                            samples_query[key] = [value[i] for i in query_indices]
+                        else:
+                            samples_support[key] = value
+                            samples_query[key] = value
+                    dict_support = (
+                         self.trainer.prepare_data_deepo(samples_support,train=False) if self.params.model.name == "DeepONet" else self.trainer.prepare_data(samples_support,train=False)
+                    )
+                    dict_query = (
+                        self.trainer.prepare_data_deepo(samples_query ,
+                                                        train=False) if self.params.model.name == "DeepONet" else self.trainer.prepare_data(
+                            samples_query, train=False)
+                    )
+                else:
+
+                    dict_support = {}
+                    dict_query = (
+                        self.trainer.prepare_data_deepo(samples,
+                                                        train=False) if self.params.model.name == "DeepONet" else self.trainer.prepare_data(
+                            samples, train=False)
+                    )
 
                 # Iterate over each attribute in the original dictionary
-                for key, value in dict.items():
-                    # Randomly sample 30 distinct items from the original 50-item list
-                    sampled_all = self.datasets[type].rng.sample(value, self.params.data.num_support+self.params.data.query)
-
-                    # Split the sampled data into 20 and 10
-                    dict_support[key] = sampled_all[:self.params.data.num_support]
-                    dict_query[key] = sampled_all[self.params.data.num_support:]
+                # for key, value in dict.items():
+                #     sampled_all = self.datasets[type].rng.choice(value, self.params.data.num_support+self.params.data.num_query)
+                #
+                #     # Split the sampled data into 20 and 10
+                #     dict_support[key] = sampled_all[:self.params.data.num_support]
+                #     dict_query[key] = sampled_all[self.params.data.num_support:]
                 data_label = dict_query["data_label"]
                 if self.params.model.name == "DeepONet":
                     with torch.cuda.amp.autocast(enabled=bool(params.amp), dtype=torch.bfloat16):
@@ -142,7 +175,8 @@ class Evaluator(object):
                         )  # (bs, output_len, x_num, data_dim)
                         output_start = self.params.data.input_len if self.params.data.output_start_eval is None else self.params.data.output_start_eval
                         num_output_t = (params.data.t_num - output_start + 1) // self.params.data.output_step
-                        data_output_zero_shot = output.reshape(bs, num_output_t, params.data.x_num, 1)
+                        num = self.params.data.num_query if self.params.meta else bs
+                        data_output_zero_shot = output.reshape(num, num_output_t, params.data.x_num, 1)
                 elif self.params.model.name == "FNO":
                     data_output_zero_shot = model(
                         dict_query["data_input"],
@@ -168,36 +202,36 @@ class Evaluator(object):
                         learner = self.deeponet_adapt(model,dict_support)
                         with torch.cuda.amp.autocast(enabled=bool(params.amp), dtype=torch.bfloat16):
                             output = learner(
-                                querypoint=dict["query_tensor_reshaped"],
-                                value_at_sensor=dict["data_input_reshaped"],
+                                querypoint=dict_query["query_tensor_reshaped"],
+                                value_at_sensor=dict_query["data_input_reshaped"],
                             )  # (bs, output_len, x_num, data_dim)
                             output_start = self.params.data.input_len if self.params.data.output_start_eval is None else self.params.data.output_start_eval
                             num_output_t = (params.data.t_num - output_start + 1) // self.params.data.output_step
-                            data_output_few_shot = output.reshape(bs, num_output_t, params.data.x_num, 1)
+                            data_output_few_shot = output.reshape(self.params.data.num_query, num_output_t, params.data.x_num, 1)
 
                     elif self.params.model.name == "FNO":
 
                         learner = self.fno_adapt(model,dict_support)
                         data_output_few_shot = learner(
-                            dict["data_input"],
+                            dict_query["data_input"],
                         )  # (bs, output_len, x_num, data_dim
                     else:
 
-                        learner = self.full_adapt(model,dict_support)
+                        learner = self.freeze_symbol_adapt(model,dict_support) if self.params.model.name == "prose_freeze_symbol" else self.full_adapt(model,dict_support)
                         with torch.cuda.amp.autocast(enabled=bool(params.amp), dtype=torch.bfloat16):
                             output_dict_few_shot = learner(
                                 "generate",
-                                data_input=dict["data_input"],
-                                input_times=dict["input_times"][..., None],
-                                output_times=dict["output_times"][..., None],
-                                symbol_input=dict["symbol_input"],
-                                symbol_padding_mask=dict["symbol_mask"]
+                                data_input=dict_query["data_input"],
+                                input_times=dict_query["input_times"][..., None],
+                                output_times=dict_query["output_times"][..., None],
+                                symbol_input=dict_query["symbol_input"],
+                                symbol_padding_mask=dict_query["symbol_mask"]
                             )  # (bs, output_len, x_num, x_num, data_dim)
 
                         data_output_few_shot = output_dict_few_shot["data_output"]
-                        data_output_few_shot = data_output_few_shot * dict["data_mask"]
+                        data_output_few_shot = data_output_few_shot * dict_query["data_mask"]
 
-                    data_loss_few_shot = data_loss_fn(data_output_few_shot, data_label, dict["data_mask"], dict["loss_weight"])
+                    data_loss_few_shot = data_loss_fn(data_output_few_shot, data_label, dict_query["data_mask"], dict_query["loss_weight"])
 
                     results["data_loss_few_shot"].extend(data_loss_few_shot)
                 else:
@@ -207,15 +241,16 @@ class Evaluator(object):
                     # denormalize data
                     eps = 1e-6
                     if not params.zero_shot_only:
-                        data_output_few_shot = data_output_few_shot * (dict["std"]+ eps) + dict["mean"]
+                        data_output_few_shot = data_output_few_shot * (dict_query["std"]+ eps) + dict_query["mean"]
                     else:
                         data_output_few_shot = None
-                    data_output_zero_shot = data_output_zero_shot * (dict["std"] + eps) + dict["mean"]
-                    data_label = data_label * (dict["std"] + eps) + dict["mean"]
+                    data_output_zero_shot = data_output_zero_shot * (dict_query["std"] + eps) + dict_query["mean"]
+                    data_label = data_label * (dict_query["std"] + eps) + dict_query["mean"]
                 if not params.zero_shot_only:
-                    cur_result_few_shot = compute_metrics(
-                        data_output_few_shot, data_label, metrics=params.validation_metrics_print, batched=True
-                    )
+                    with torch.no_grad():
+                        cur_result_few_shot = compute_metrics(
+                            data_output_few_shot, data_label, metrics=params.validation_metrics_print, batched=True
+                        )
 
                     for k in cur_result_few_shot.keys():
                         keys = k + "_few_shot"
@@ -225,10 +260,10 @@ class Evaluator(object):
                             results[keys].extend(cur_result_few_shot[k])
                 else:
                     cur_result_few_shot =None
-
-                cur_result_zero_shot = compute_metrics(
-                    data_output_zero_shot, data_label, metrics=params.validation_metrics_print, batched=True
-                )
+                with torch.no_grad():
+                    cur_result_zero_shot = compute_metrics(
+                        data_output_zero_shot, data_label, metrics=params.validation_metrics_print, batched=True
+                    )
 
                 for k in cur_result_zero_shot.keys():
                     keys = k + "_zero_shot"
@@ -327,7 +362,8 @@ class Evaluator(object):
             for k, v in results.items():
                 if k.startswith("_r2"):
                     results[k] = np.mean(np.array(v))
-                results[k] = np.sum(np.array(v))
+                else:
+                    results[k] = np.sum(np.array(v))
             results["size"] = eval_size
             all_results[type] = results
 
@@ -390,7 +426,10 @@ class Evaluator(object):
                 dim = (params.data[type.split("%")[0]]).dim
             row = [type,dim]
             for k in headers[2:]:
-                row.append(results[k])
+                try:
+                    row.append(results[k])
+                except:
+                    row.append("N/A")
             table.append(row)
 
         headers = list(map(lambda s: metric_to_header[s] if s in metric_to_header else s, headers))
@@ -412,7 +451,17 @@ class Evaluator(object):
         learner = to_cuda(learner)
         # learner = copy.deepcopy(model)
         # learner.eval()
+
+        if params.evalfreezedmodule is not None:
+            for name, param in learner.named_parameters():
+                if name.startswith('module.'):
+                    name = name[len('module.'):]
+                if name.startswith(tuple(params.evalfreezedmodule)):
+                    param = param.detach()
+                    param.requires_grad = False
         learner.train()
+
+
         # inner_optimizer = torch.optim.SGD(learner.parameters(),
         #                                   lr=params.model.meta.meta_lr)
         for _ in range(params.meta_step):
@@ -438,6 +487,48 @@ class Evaluator(object):
 
         return learner
 
+    def freeze_symbol_adapt(self,model, support_dict):
+        params = self.params
+        num_inner_loops = params.num_adapt_eval
+
+
+        learner = model.inner_model.clone()
+        learner = to_cuda(learner)
+        # learner = copy.deepcopy(model)
+        # learner.eval()
+        learner.train()
+        # inner_optimizer = torch.optim.SGD(learner.parameters(),
+        #                                   lr=params.model.meta.meta_lr)
+
+        output_noinner = model.no_inner_model(
+            "fwd",
+            # data_input= dict_support["data_input"],
+            # input_times= dict_support["input_times"][..., None],
+            symbol_input=support_dict["symbol_input"],
+            symbol_padding_mask=support_dict["symbol_mask"], )
+        for _ in range(params.meta_step):
+            with torch.cuda.amp.autocast(enabled=bool(params.amp),
+                                         dtype=torch.bfloat16):
+                output_dict = learner(
+                    "fwd",
+                    data_input=support_dict["data_input"],
+                    input_times= support_dict["input_times"][..., None],
+                    output_times=support_dict["output_times"][..., None],
+                    symbol_encoded=output_noinner["symbol_encoded"],
+                    symbol_padding_mask=support_dict["symbol_mask"],
+                )
+                data_output = output_dict["data_output"]
+                support_data_loss = self.trainer.data_loss_fn(data_output,
+                                                              support_dict[
+                                                                  "data_label"],
+                                                              support_dict[
+                                                                  "data_mask"],
+                                                              support_dict[
+                                                                  "loss_weight"])
+                learner.adapt(support_data_loss, lr=self.params.model.meta.meta_lr)
+
+        return  Combine_freeze_encoder( model.no_inner_model, learner)
+
 
     def deeponet_adapt(self,model,dict_support):
         params = self.params
@@ -455,7 +546,7 @@ class Evaluator(object):
                 )
                 output_start = self.params.data.input_len if self.params.data.output_start is None else self.params.data.output_start
                 num_output_t = (params.data.t_num - output_start + 1) // self.params.data.output_step
-                data_output = output.reshape(params.eval_support_size, num_output_t, params.data.x_num, 1)
+                data_output = output.reshape(params.data.num_support, num_output_t, params.data.x_num, 1)
                 support_data_loss = self.trainer.data_loss_fn(data_output, dict_support["data_label"],
                                                       dict_support["data_mask"], dict_support["loss_weight"])
 
@@ -476,106 +567,106 @@ class Evaluator(object):
             )  # (bs, output_len, x_num, data_dim)
             output_start = self.params.data.input_len if self.params.data.output_start is None else self.params.data.output_start
             num_output_t = (params.data.t_num - output_start + 1) // self.params.data.output_step
-            data_output = output.reshape(params.eval_support_size, num_output_t, params.data.x_num, 1)
+            data_output = output.reshape(params.data.num_support, num_output_t, params.data.x_num, 1)
             support_data_loss = self.trainer.data_loss_fn(data_output, dict_support["data_label"],
                                                   dict_support["data_mask"], dict_support["loss_weight"])
 
             learner.adapt(support_data_loss, lr=self.params.model.meta.meta_lr)
         return learner
-    def freeze_adapt_encoder(self,model,type):
-
-
-        params = self.params
-        param_accumulator = None
-        num_inner_loops = params.num_adapt_eval
-
-        for __ in range(num_inner_loops):
-            learner = model.inner_model.clone()
-            learner = to_cuda(learner)
-            learner.eval()
-            if params.data.diff_supp_query_type:
-                type_idx = params.data.eval_types_query.index(type)
-                type_support = params.data.eval_types_support[type_idx]
-                support_data = self.support_iter[type_support]
-            else:
-                try:
-                    support_data = next(self.support_iter[type])
-                except:
-                    # logger.info(f"Reached end of dataloader, restart {self.dataloader_count}...")
-                    self.support_iter[type] =  iter(DataLoader(
-                        self.support_datasets[type],
-                        batch_size=self.params.eval_support_size,
-                        num_workers=self.params.num_workers,
-                        # num_workers=1,
-                        # pin_memory=True,
-                        shuffle=True,
-                        collate_fn=custom_collate(self.params.data.max_output_dimension, self.symbol_env)
-                    ))
-                    support_data = next(self.support_iter[type])
-            support_dict = self.trainer.prepare_data(support_data, train=True)
-            output_noinner = model.no_inner_model(
-                        data_input= support_dict["data_input"],
-                        input_times= support_dict["input_times"][..., None],
-                        symbol_input=support_dict["symbol_input"],
-                        symbol_padding_mask=support_dict["symbol_mask"],)
-            with torch.cuda.amp.autocast(enabled=bool(params.amp),
-                                         dtype=torch.bfloat16):
-                adapt_before = learner(
-                    "fwd",
-                    output_times=support_dict["output_times"][..., None],
-                    embedder=model.no_inner_model.embedder,
-                    fused=output_noinner["fused"],
-                    fused_mask=output_noinner["fused_mask"]
-                )
-            learner.train()
-            for _ in range(params.meta_step):
-                with torch.cuda.amp.autocast(enabled=bool(params.amp),
-                                             dtype=torch.bfloat16):
-                    output_dict = learner(
-                        "fwd",
-                        output_times=support_dict["output_times"][..., None],
-                        embedder=model.no_inner_model.embedder,
-                        fused=output_noinner["fused"],
-                        fused_mask=output_noinner["fused_mask"]
-                    )
-                    data_output = output_dict["data_output"]
-                    support_data_loss = self.trainer.data_loss_fn(data_output,
-                                                                  support_dict[
-                                                                      "data_label"],
-                                                                  support_dict[
-                                                                      "data_mask"],
-                                                                  support_dict[
-                                                                      "loss_weight"])
-                    learner.adapt(support_data_loss, lr=self.params.model.meta.meta_lr)
-            learner.eval()
-            adapt_after = learner(
-                "fwd",
-                output_times=support_dict["output_times"][..., None],
-                embedder=model.no_inner_model.embedder,
-                fused=output_noinner["fused"],
-                fused_mask=output_noinner["fused_mask"]
-            )
-            cca_dict = compare_parameters_with_similarity(adapt_before, adapt_after)
-            logger.info("cca similarity")
-            for key, value in cca_dict.items():
-                logger.info(f"{key}: {value}")
-
-            if param_accumulator is None:
-                param_accumulator = {name: torch.zeros_like(param) for name, param in
-                                     learner.named_parameters()}
-
-            for name, param in learner.named_parameters():
-                param_accumulator[name] += param.detach()
-
-        # Calculate mean of accumulated parameters
-        for name in param_accumulator:
-            param_accumulator[name] /= num_inner_loops
-
-        averaged_model = model.clone()
-        # Update model with mean parameters
-        for name, param in averaged_model.named_parameters():
-            param.data = param_accumulator[name]
-        return averaged_model
+    # def freeze_adapt_encoder(self,model,type):
+    #
+    #
+    #     params = self.params
+    #     param_accumulator = None
+    #     num_inner_loops = params.num_adapt_eval
+    #
+    #     for __ in range(num_inner_loops):
+    #         learner = model.inner_model.clone()
+    #         learner = to_cuda(learner)
+    #         learner.eval()
+    #         if params.data.diff_supp_query_type:
+    #             type_idx = params.data.eval_types_query.index(type)
+    #             type_support = params.data.eval_types_support[type_idx]
+    #             support_data = self.support_iter[type_support]
+    #         else:
+    #             try:
+    #                 support_data = next(self.support_iter[type])
+    #             except:
+    #                 # logger.info(f"Reached end of dataloader, restart {self.dataloader_count}...")
+    #                 self.support_iter[type] =  iter(DataLoader(
+    #                     self.support_datasets[type],
+    #                     batch_size=self.params.eval_support_size,
+    #                     num_workers=self.params.num_workers,
+    #                     # num_workers=1,
+    #                     # pin_memory=True,
+    #                     shuffle=True,
+    #                     collate_fn=custom_collate(self.params.data.max_output_dimension, self.symbol_env)
+    #                 ))
+    #                 support_data = next(self.support_iter[type])
+    #         support_dict = self.trainer.prepare_data(support_data, train=True)
+    #         output_noinner = model.no_inner_model(
+    #                     data_input= support_dict["data_input"],
+    #                     input_times= support_dict["input_times"][..., None],
+    #                     symbol_input=support_dict["symbol_input"],
+    #                     symbol_padding_mask=support_dict["symbol_mask"],)
+    #         with torch.cuda.amp.autocast(enabled=bool(params.amp),
+    #                                      dtype=torch.bfloat16):
+    #             adapt_before = learner(
+    #                 "fwd",
+    #                 output_times=support_dict["output_times"][..., None],
+    #                 embedder=model.no_inner_model.embedder,
+    #                 fused=output_noinner["fused"],
+    #                 fused_mask=output_noinner["fused_mask"]
+    #             )
+    #         learner.train()
+    #         for _ in range(params.meta_step):
+    #             with torch.cuda.amp.autocast(enabled=bool(params.amp),
+    #                                          dtype=torch.bfloat16):
+    #                 output_dict = learner(
+    #                     "fwd",
+    #                     output_times=support_dict["output_times"][..., None],
+    #                     embedder=model.no_inner_model.embedder,
+    #                     fused=output_noinner["fused"],
+    #                     fused_mask=output_noinner["fused_mask"]
+    #                 )
+    #                 data_output = output_dict["data_output"]
+    #                 support_data_loss = self.trainer.data_loss_fn(data_output,
+    #                                                               support_dict[
+    #                                                                   "data_label"],
+    #                                                               support_dict[
+    #                                                                   "data_mask"],
+    #                                                               support_dict[
+    #                                                                   "loss_weight"])
+    #                 learner.adapt(support_data_loss, lr=self.params.model.meta.meta_lr)
+    #         learner.eval()
+    #         adapt_after = learner(
+    #             "fwd",
+    #             output_times=support_dict["output_times"][..., None],
+    #             embedder=model.no_inner_model.embedder,
+    #             fused=output_noinner["fused"],
+    #             fused_mask=output_noinner["fused_mask"]
+    #         )
+    #         cca_dict = compare_parameters_with_similarity(adapt_before, adapt_after)
+    #         logger.info("cca similarity")
+    #         for key, value in cca_dict.items():
+    #             logger.info(f"{key}: {value}")
+    #
+    #         if param_accumulator is None:
+    #             param_accumulator = {name: torch.zeros_like(param) for name, param in
+    #                                  learner.named_parameters()}
+    #
+    #         for name, param in learner.named_parameters():
+    #             param_accumulator[name] += param.detach()
+    #
+    #     # Calculate mean of accumulated parameters
+    #     for name in param_accumulator:
+    #         param_accumulator[name] /= num_inner_loops
+    #
+    #     averaged_model = model.clone()
+    #     # Update model with mean parameters
+    #     for name, param in averaged_model.named_parameters():
+    #         param.data = param_accumulator[name]
+    #     return averaged_model
 
     # def freeze_adapt_symbol(self,model,type):
     #
