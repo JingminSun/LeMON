@@ -126,7 +126,7 @@ exp_id: null
 use_wandb: 1
 wandb:
   project: null
-  entity: null
+  entity: schaefferlab1
   notes: null
   name: null
   id: ${..exp_id}

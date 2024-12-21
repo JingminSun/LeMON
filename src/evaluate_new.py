@@ -452,19 +452,19 @@ class Evaluator(object):
         # learner = copy.deepcopy(model)
         # learner.eval()
 
-        if params.evalfreezedmodule is not None:
-            for name, param in learner.named_parameters():
-                if name.startswith('module.'):
-                    name = name[len('module.'):]
-                if name.startswith(tuple(params.evalfreezedmodule)):
-                    param = param.detach()
-                    param.requires_grad = False
+        # if params.evalfreezedmodule is not None:
+        #     for name, param in learner.named_parameters():
+        #         if name.startswith('module.'):
+        #             name = name[len('module.'):]
+        #         if name.startswith(tuple(params.evalfreezedmodule)):
+        #             param = param.detach()
+        #             param.requires_grad = False
         learner.train()
 
 
         # inner_optimizer = torch.optim.SGD(learner.parameters(),
         #                                   lr=params.model.meta.meta_lr)
-        for _ in range(params.meta_step):
+        for _ in range(params.meta_step_eval):
             with torch.cuda.amp.autocast(enabled=bool(params.amp),
                                          dtype=torch.bfloat16):
                 output_dict = learner(
@@ -506,7 +506,7 @@ class Evaluator(object):
             # input_times= dict_support["input_times"][..., None],
             symbol_input=support_dict["symbol_input"],
             symbol_padding_mask=support_dict["symbol_mask"], )
-        for _ in range(params.meta_step):
+        for _ in range(params.meta_step_eval):
             with torch.cuda.amp.autocast(enabled=bool(params.amp),
                                          dtype=torch.bfloat16):
                 output_dict = learner(
@@ -537,7 +537,7 @@ class Evaluator(object):
         learner = model.clone()
         learner = to_cuda(learner)
         learner.train()
-        for _ in range(params.meta_step):
+        for _ in range(params.meta_step_eval):
             with torch.cuda.amp.autocast(enabled=bool(params.amp),
                                          dtype=torch.bfloat16):
                 output = learner(
@@ -560,7 +560,7 @@ class Evaluator(object):
         learner = model.clone()
         learner = to_cuda(learner)
         learner.train()
-        for _ in range(params.meta_step):
+        for _ in range(params.meta_step_eval):
 
             output = learner(
                 dict_support["data_input"],
