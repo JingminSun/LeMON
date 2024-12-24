@@ -81,7 +81,7 @@ class MultiPDE(Dataset):
         self.directory = params.data.directory
         if self.types == -1:
             self.types = [name for name in os.listdir(self.directory ) if
-             os.path.isdir(os.path.join(self.directory , name)) and "cosflux" not in name  and "linearflux" not in name]
+             os.path.isdir(os.path.join(self.directory , name))]
         print(self.types)
         self.num_workers = params.num_workers
         self.local_rank = params.local_rank
@@ -168,7 +168,7 @@ class MultiPDE(Dataset):
                 reload_indices = self.rng.choice(range(self.skip, self.skip + self.reload_size), self.get_size,
                                                  replace=False)
             else:
-                start = int(np.ceil(self.skip / self.IC_per_param))  # Ensure start is an integer
+                start = int(np.ceil(self.skip / self.IC_per_param))  * self.IC_per_param  # Ensure start is an integer
                 size = self.get_size - self.get_size % self.IC_per_param
                 reload_indices = np.arange(start, start + size, dtype=int)
             sorted_reload_indices = sorted(reload_indices)

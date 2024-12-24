@@ -45,10 +45,10 @@ def get_dataset(params, symbol_env, split, skip = 0,meta = True, mixed_type= Fal
         else:
             if  params.data.eval_types == -1 and split == "eval":
                 types = [name for name in os.listdir(params.data.directory) if
-                                  os.path.isdir(os.path.join(params.data.directory, name)) and "cosflux" not in name]
+                                  os.path.isdir(os.path.join(params.data.directory, name))]
             elif params.data.train_types == -1 and split == "train":
                 types = [name for name in os.listdir(params.data.directory) if
-                                  os.path.isdir(os.path.join(params.data.directory, name)) and "cosflux" not in name]
+                                  os.path.isdir(os.path.join(params.data.directory, name))]
             else:
                 types =  params.data.eval_types if split == "eval" else params.data.train_types
                 types = [types] if isinstance(types,str) else types

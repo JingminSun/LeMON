@@ -78,6 +78,7 @@ class MAML(MetaLearner):
                     eta = self.eta,
                     first_order=first_order,
                     allow_unused=allow_unused,
+                    clip_norm=self.clip_norm,
                     allow_nograd=allow_nograd)
 
 

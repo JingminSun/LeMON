@@ -40,40 +40,6 @@ class PROSE_1DPDE(nn.Module):
         self.data_decoder = DataOperatorDecoder(config.data_decoder)
 
 
-    # def freeze_param(self, freeze_module):
-    #     if not isinstance(freeze_module,list):
-    #         freeze_module = [freeze_module]
-    #     for module in freeze_module:
-    #         if module == "embedder":
-    #             self.embedder = freeze(self.embedder)
-    #         elif module == "data_encoder":
-    #             self.data_encoder = freeze(self.data_encoder)
-    #         elif module == "symbol_encoder":
-    #             self.symbol_encoder = freeze(self.symbol_encoder)
-    #         elif module == "fusion":
-    #             self.fusion =freeze(self.fusion)
-    #         elif module == "data_decoder":
-    #             self.data_decoder = freeze(self.ddata_decoder)
-    #         else:
-    #             raise f"Module {module} not in the model, unable to freeze"
-    #
-    # def unfreeze_param(self, unfreeze_module):
-    #     if not isinstance(unfreeze_module,list):
-    #         unfreeze_module = [unfreeze_module]
-    #     for module in unfreeze_module:
-    #         if module == "embedder":
-    #             self.embedder = unfreeze(self.embedder)
-    #         elif module == "data_encoder":
-    #             self.data_encoder = unfreeze(self.data_encoder)
-    #         elif module == "symbol_encoder":
-    #             self.symbol_encoder = unfreeze(self.symbol_encoder)
-    #         elif module == "fusion":
-    #             self.fusion =unfreeze(self.fusion)
-    #         elif module == "data_decoder":
-    #             self.data_decoder = unfreeze(self.ddata_decoder)
-    #         else:
-    #             raise f"Module {module} not in the model, unable to unfreeze"
-
     def summary(self):
         s = "\n"
         s += f"\tEmbedder:        {sum([p.numel() for p in self.embedder.parameters() if p.requires_grad]):,}\n"
@@ -302,16 +268,10 @@ class PROSE_1DPDE_freeze_symbol_encoder(nn.Module):
         self.x_num = data_config.x_num
         self.max_output_dim = data_config.max_output_dimension
 
-        # self.embedder = LinearEmbedder_1DPDE(config.embedder, self.x_num, self.max_output_dim)
-        # self.data_encoder = TransformerDataEncoder(config.data_encoder)
         self.symbol_encoder = TransformerSymbolEncoder(config.symbol_encoder, symbol_env.equation_id2word)
-        # self.fusion = TransformerFusion(config.fusion)
     def summary(self):
         s = "\n"
-        # s += f"\tEmbedder:        {sum([p.numel() for p in self.embedder.parameters() if p.requires_grad]):,}\n"
-        # s += f"\tData Encoder:    {sum([p.numel() for p in self.data_encoder.parameters() if p.requires_grad]):,}\n"
         s += f"\tSymbol Encoder:  {sum([p.numel() for p in self.symbol_encoder.parameters() if p.requires_grad]):,}\n"
-        # s += f"\tFusion:          {sum([p.numel() for p in self.fusion.parameters() if p.requires_grad]):,}"
         return s
 
     def forward(self, mode, **kwargs):
@@ -343,7 +303,7 @@ class PROSE_1DPDE_freeze_symbol_encoder(nn.Module):
             symbol_padding_mask:    LongTensor           (bs, symbol_len) # True for padded elements
 
         Output:
-            data_output:     Tensor     (bs, output_len, x_num, x_num, data_dim)
+            data_output:     Tensor     (bs, output_len, x_num, data_dim)
         """
         output = {}
         """
@@ -356,7 +316,7 @@ class PROSE_1DPDE_freeze_symbol_encoder(nn.Module):
             symbol_input, src_key_padding_mask=symbol_padding_mask
         )  # (bs, symbol_len, dim)
         output["symbol_encoded"] = symbol_encoded
-        # output["fused_mask"] = fused_mask
+
         return output
 
     def generate(self, **kwargs):

@@ -62,11 +62,12 @@ class Evaluator(object):
         if self.params.data.eval_skip > -1:
             self.skip = self.params.data.eval_skip
         else:
-            if self.params.zero_shot_only:
-                base_skip = 0
-            else:
-                base_skip = self.params.eval_support_size * 20
-            self.skip =  base_skip+self.params.train_size#*2 if self.params.meta else  base_skip+self.params.train_size
+            # if self.params.zero_shot_only:
+            #     base_skip = 0
+            # else:
+            #     base_skip = self.params.eval_support_size * 20
+            # self.skip =  base_skip+self.params.train_size#*2 if self.params.meta else  base_skip+self.params.train_size
+            self.skip = self.params.train_size
         self.datasets: dict = get_dataset(self.params, self.symbol_env, split="eval", skip = self.skip)
         self.dataloaders = {
             k: DataLoader(
@@ -109,20 +110,20 @@ class Evaluator(object):
         all_results = {}
 
         for type, loader in self.dataloaders.items():
-            eval_size = 0
+            eval_size: int = 0
             num_plotted = 0
             results = defaultdict(list)
             # if self.params.model.name == "DeepONet" or  self.params.model.name == "FNO":
             #     assert params.zero_shot_only, "only zero shot for deeponet"
             for idx, samples in enumerate(loader):
                 bs = len(samples["data"])
-                eval_size += bs
+                eval_size += bs if self.params.zero_shot_only else bs - self.params.data.num_support
 
                 total_samples = bs
                 random_indices = self.datasets[type].rng.permutation(total_samples)
                 support_indices = random_indices[:self.params.data.num_support]
                 query_indices = random_indices[
-                                self.params.data.num_support:self.params.data.num_support + self.params.data.num_query]
+                                self.params.data.num_support:]
                 if not self.params.zero_shot_only:
                     samples_support = {}
                     samples_query = {}
@@ -175,7 +176,8 @@ class Evaluator(object):
                         )  # (bs, output_len, x_num, data_dim)
                         output_start = self.params.data.input_len if self.params.data.output_start_eval is None else self.params.data.output_start_eval
                         num_output_t = (params.data.t_num - output_start + 1) // self.params.data.output_step
-                        num = self.params.data.num_query if self.params.meta else bs
+                        num = bs - self.params.data.num_support if self.params.meta else bs
+                        print()
                         data_output_zero_shot = output.reshape(num, num_output_t, params.data.x_num, 1)
                 elif self.params.model.name == "FNO":
                     data_output_zero_shot = model(
@@ -207,7 +209,7 @@ class Evaluator(object):
                             )  # (bs, output_len, x_num, data_dim)
                             output_start = self.params.data.input_len if self.params.data.output_start_eval is None else self.params.data.output_start_eval
                             num_output_t = (params.data.t_num - output_start + 1) // self.params.data.output_step
-                            data_output_few_shot = output.reshape(self.params.data.num_query, num_output_t, params.data.x_num, 1)
+                            data_output_few_shot = output.reshape(bs - self.params.data.num_support, num_output_t, params.data.x_num, 1)
 
                     elif self.params.model.name == "FNO":
 

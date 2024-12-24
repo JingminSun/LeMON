@@ -192,10 +192,10 @@ class LinearEmbedder_1DPDE(nn.Module):
     def encode(self, data, times):
         """
         Input:
-            data:           Tensor (bs, input_len, x_num, x_num, data_dim)
+            data:           Tensor (bs, input_len, x_num, data_dim)
             times:          Tensor (bs, input_len, 1)
         Output:
-            data:           Tensor (bs, data_len, dim)      data_len = input_len * patch_num * patch_num
+            data:           Tensor (bs, data_len, dim)      data_len = input_len * patch_num
                             embedded data + time embeddings + patch position embeddings
         """
         bs = data.size(0)
