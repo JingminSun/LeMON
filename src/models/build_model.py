@@ -4,7 +4,7 @@ from tabulate import tabulate
 from collections import OrderedDict
 from .transformer_wrappers import  PROSE_1DPDE, Combine_freeze_encoder, PROSE_1DPDE_inner_data,PROSE_1DPDE_freeze_symbol_encoder
 from other_models.deeponet import DeepONet
-from .meta_model import MAML, MetaSGD, MAMLAdamW
+from .meta_model import MAML, MetaSGD, MAMLAdamW,LearningRateModel
 from .finetune_model import assign_linear_lora
 logger = getLogger()
 from neuralop.models import FNO
@@ -64,7 +64,7 @@ def build_model(params, model_config, data_config, symbol_env):
         if not params.zero_shot_only:
             if model_config.meta.name == "MAML":
                 modules["model"] = MAML(base_model,
-                                model_config.meta.meta_lr,
+                                    model_config.meta.meta_lr,
                                     eta=model_config.meta.gd_eta,
                                     first_order=model_config.meta.first_order,
                                     allow_nograd=model_config.meta.allow_nograd,
@@ -104,7 +104,16 @@ def build_model(params, model_config, data_config, symbol_env):
                                     allow_nograd=model_config.meta.allow_nograd,
                                     allow_unused=model_config.meta.allow_unused)
         if not params.zero_shot_only:
-            modules["model"] = Combine_freeze_encoder(no_inner_model,inner_model)
+            if model_config.meta.learnable_lr:
+                lr_model = LearningRateModel(inner_model.parameters(),
+                                input_dim = model_config.symbol_encoder.dim_emb,
+                                hidden_dim =  model_config.learning_rate.hidden_dim,
+                                max_value=params.clip_grad_norm,
+                                method=model_config.meta.learnable_lr_method)
+            else:
+                lr_model = None
+
+            modules["model"] = Combine_freeze_encoder(params,no_inner_model,inner_model,lr_model=lr_model)
         else:
             modules["model"] = PROSE_1DPDE(
                 model_config,

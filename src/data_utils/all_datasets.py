@@ -282,11 +282,6 @@ class MultiPDE_DeepO(MultiPDE):
             dx = (self.x_range[1] -self.x_range[0])/self.x_num
             x = torch.from_numpy(np.linspace(self.x_range[0],self.x_range[1], self.x_num +1)[:-1] + 0.5 * dx).float()
 
-            # query_locations = []
-            # for tt in t[self.output_start::self.output_step]:
-            #     for xx in x:
-            #         query_locations.append([tt, xx])
-
             query_matrix = t[self.output_start::self.output_step]
 
             # Example of how to create the final y dictionary

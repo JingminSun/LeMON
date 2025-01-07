@@ -60,13 +60,20 @@ for dataset in "${datasets[@]}"; do
 #  '''
 
 done
+#
+#   '''
+#
+#   #### Change for-loop within all conservation types: One Shock/ Two shocks/ rarefaction: just modify file_name and data.IC_types
+#    file_name=one_shock
+#    rm $directory/$dataset/${dataset}_${ICs_equation}_${file_name}.prefix
+#    rm $directory/$dataset/${dataset}_${ICs_equation}_${file_name}_data.h5
+#    CUDA_VISIBLE_DEVICES=$GPU python3 src/data_gen_pde.py num_workers=12  IC_per_param=$ICs_equation data.param_range_gamma=0.1 data.IC_types=one_shock data.types=${dataset}  size=512000 directory=$directory file_name=$file_name
+#  '''
 
-   '''
 
-   #### Change for-loop within all conservation types: One Shock/ Two shocks/ rarefaction: just modify file_name and data.IC_types
-    file_name=one_shock
-    rm $directory/$dataset/${dataset}_${ICs_equation}_${file_name}.prefix
-    rm $directory/$dataset/${dataset}_${ICs_equation}_${file_name}_data.h5
-    CUDA_VISIBLE_DEVICES=$GPU python3 src/data_gen_pde.py num_workers=12  IC_per_param=$ICs_equation data.param_range_gamma=0.1 data.IC_types=one_shock data.types=${dataset}  size=512000 directory=$directory file_name=$file_name
-  '''
+#### Sort and filter data for meta_learning
 
+CUDA_VISIBLE_DEVICES=$GPU python3 src/utils/sort_data.py +base_directory=${directory}
+
+CUDA_VISIBLE_DEVICES=$GPU python3 src/utils/valid_data.py +base_directory=${directory}
+## you can also sort a filter a single file by python3 src/utils/valid_data_single.py by changing parameters in that file

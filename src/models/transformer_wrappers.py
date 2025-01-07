@@ -15,7 +15,7 @@ from .transformer import (
 from .embedder import LinearEmbedder, LinearEmbedder_1DPDE
 from logging import getLogger
 from .meta_utils import freeze, unfreeze
-
+from .meta_model import LearningRateModel
 logger = getLogger()
 
 
@@ -157,7 +157,8 @@ class PROSE_1DPDE_inner_data(nn.Module):
         self.embedder = LinearEmbedder_1DPDE(config.embedder, self.x_num, self.max_output_dim)
         self.data_encoder = TransformerDataEncoder(config.data_encoder)
         # self.symbol_encoder = TransformerSymbolEncoder(config.symbol_encoder, symbol_env.equation_id2word)
-        self.fusion = TransformerFusion(config.fusion)
+        if not self.config.meta.learnable_lr:
+            self.fusion = TransformerFusion(config.fusion)
         self.data_decoder = DataOperatorDecoder(config.data_decoder)
 
 
@@ -166,7 +167,8 @@ class PROSE_1DPDE_inner_data(nn.Module):
         s += f"\tEmbedder:        {sum([p.numel() for p in self.embedder.parameters() if p.requires_grad]):,}\n"
         s += f"\tData Encoder:    {sum([p.numel() for p in self.data_encoder.parameters() if p.requires_grad]):,}\n"
         # s += f"\tSymbol Encoder:  {sum([p.numel() for p in self.symbol_encoder.parameters() if p.requires_grad]):,}\n"
-        s += f"\tFusion:          {sum([p.numel() for p in self.fusion.parameters() if p.requires_grad]):,}\n"
+        if not  self.config.meta.learnable_lr:
+            s += f"\tFusion:          {sum([p.numel() for p in self.fusion.parameters() if p.requires_grad]):,}\n"
         s += f"\tData Decoder:    {sum([p.numel() for p in self.data_decoder.parameters() if p.requires_grad]):,}"
         return s
 
@@ -223,14 +225,16 @@ class PROSE_1DPDE_inner_data(nn.Module):
         """
 
         data_encoded = self.data_encoder(data_input)  # (bs, data_len, dim)
-
-        fused, fused_mask = self.fusion(
-            x0=data_encoded,
-            x1=symbol_encoded,
-            key_padding_mask0=None,
-            key_padding_mask1=symbol_padding_mask,
-        )  # (bs, data_len+symbol_len, dim)
-
+        if symbol_encoded is not None:
+            fused, fused_mask = self.fusion(
+                x0=data_encoded,
+                x1=symbol_encoded,
+                key_padding_mask0=None,
+                key_padding_mask1=symbol_padding_mask,
+            )  # (bs, data_len+symbol_len, dim)
+        else:
+            fused = data_encoded
+            fused_mask = None
         output["data_encoded"] = data_encoded
         output["symbol_encoded"] = symbol_encoded
         output["fused"] = fused
@@ -324,10 +328,21 @@ class PROSE_1DPDE_freeze_symbol_encoder(nn.Module):
 
 
 class Combine_freeze_encoder(nn.Module):
-    def __init__(self, no_inner_model, inner_model):
+    def __init__(self, config,no_inner_model, inner_model, lr_model = None):
         super().__init__()
+        self.config = config.model
         self.no_inner_model = no_inner_model
         self.inner_model = inner_model
+        self.learnable_lr = self.config.meta.learnable_lr
+        if self.learnable_lr:
+            assert lr_model is not None
+            self.lr_model = lr_model
+                #LearningRateModel(self.inner_model.parameters(),
+                                             # input_dim = self.config.symbol_encoder.dim_emb,
+                                             # hidden_dim = self.config.learning_rate.hidden_dim,
+                                             # max_value=config.clip_grad_norm,
+                                             # method=self.config.meta.learnable_lr_method)
+
 
     def forward(self, mode, data_input, input_times, output_times, symbol_input, symbol_padding_mask=None):
         if mode == "fwd":
@@ -339,19 +354,31 @@ class Combine_freeze_encoder(nn.Module):
 
     def fwd(self, data_input, input_times, output_times, symbol_input, symbol_padding_mask=None):
         output_noinner = self.no_inner_model("fwd",
-                                             # data_input = data_input,
-                                             # input_times = input_times,
                                              symbol_input= symbol_input,
                                              symbol_padding_mask=symbol_padding_mask,
                                              )
+        if self.learnable_lr:
+            symbol_encoded = None
+        else:
+            symbol_encoded = output_noinner["symbol_encoded"]
         data_output = self.inner_model("fwd",
                                        data_input = data_input,
                                        input_times = input_times,
                                        output_times = output_times,
-                                       symbol_encoded = output_noinner["symbol_encoded"],
+                                       symbol_encoded = symbol_encoded,
                                        symbol_padding_mask=symbol_padding_mask,)
-
-        # data_output["data_encoded"] = output_noinner["data_encoded"]
+        if self.learnable_lr:
+            if self.config.meta.name == "MAML":
+                single_lr = True
+            else:
+                single_lr = False
+            ### assert
+            A = output_noinner["symbol_encoded"]
+            B = output_noinner["symbol_encoded"][0]
+            data_output["lr"] = self.lr_model(B,single_lr = single_lr)
+        else:
+            data_output["lr"] = None
+        data_output["symbol_encoded"] = output_noinner["symbol_encoded"]
         # data_output["data_embeded"] = output_noinner["data_embeded"]
         # data_output["fused"] = output_noinner["fused"]
         return data_output

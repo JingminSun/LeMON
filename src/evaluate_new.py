@@ -508,6 +508,10 @@ class Evaluator(object):
             # input_times= dict_support["input_times"][..., None],
             symbol_input=support_dict["symbol_input"],
             symbol_padding_mask=support_dict["symbol_mask"], )
+        if not model.learnable_lr:
+            symbol_encoded = output_noinner["symbol_encoded"]
+        else:
+            symbol_encoded = None
         for _ in range(params.meta_step_eval):
             with torch.cuda.amp.autocast(enabled=bool(params.amp),
                                          dtype=torch.bfloat16):
@@ -516,7 +520,7 @@ class Evaluator(object):
                     data_input=support_dict["data_input"],
                     input_times= support_dict["input_times"][..., None],
                     output_times=support_dict["output_times"][..., None],
-                    symbol_encoded=output_noinner["symbol_encoded"],
+                    symbol_encoded=symbol_encoded,
                     symbol_padding_mask=support_dict["symbol_mask"],
                 )
                 data_output = output_dict["data_output"]
@@ -527,9 +531,19 @@ class Evaluator(object):
                                                                   "data_mask"],
                                                               support_dict[
                                                                   "loss_weight"])
-                learner.adapt(support_data_loss, lr=self.params.model.meta.meta_lr)
+                if model.learnable_lr:
+                    if params.model.meta.name == "MAML":
+                        single_lr = True
+                    else:
+                        single_lr = False
+                    A = output_noinner["symbol_encoded"]
+                    B = output_noinner["symbol_encoded"][0]
+                    lr = model.lr_model(B, single_lr=single_lr)
+                else:
+                    lr = self.params.model.meta.meta_lr
+                learner.adapt(support_data_loss, lr=lr)
 
-        return  Combine_freeze_encoder( model.no_inner_model, learner)
+        return  Combine_freeze_encoder(params, model.no_inner_model, learner, lr_model=model.lr_model)
 
 
     def deeponet_adapt(self,model,dict_support):

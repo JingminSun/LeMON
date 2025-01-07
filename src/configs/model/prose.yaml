@@ -2,6 +2,8 @@ name: prose
 # meta_configs
 meta:
   name: MAML
+  learnable_lr: False
+  learnable_lr_method: "mean"
   meta_lr: 0.1
   first_order: True
   allow_unused: True
@@ -39,6 +41,9 @@ symbol_encoder:
     n_head: ${..n_head}
     dropout: ${..dropout}
     norm_first: ${..norm_first}
+
+learning_rate:
+  hidden_dim: 128
     
 fusion:
     n_layer: 8
