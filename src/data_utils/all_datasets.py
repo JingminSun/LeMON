@@ -292,6 +292,10 @@ class MultiPDE_DeepO(MultiPDE):
                 "query": query_matrix,
                 "task": task_name
             }
+
+            for key in cur_data.keys():
+                if key != data:
+                    y[key] = copy.deepcopy(cur_data[key])
             processed_data.append(y)
 
         return processed_data

@@ -12,16 +12,16 @@ import os
 activation = nn.Tanh()
 
 class OneInputBasis(nn.Module):
-    def __init__(self,num_sensors,dim1):
+    def __init__(self,num_sensors,dim1,hidden_dim):
         super().__init__()
         self.num_sensors = num_sensors
         self.dim1 = dim1
-
+        self.hidden_dim = hidden_dim
         bo_b = True
         bo_last = False
 
-        self.l1 = nn.Linear(self.num_sensors, 100, bias=bo_b)
-        self.l4 = nn.Linear(100,self.dim1, bias=bo_last)
+        self.l1 = nn.Linear(self.num_sensors, self.hidden_dim, bias=bo_b)
+        self.l4 = nn.Linear(self.hidden_dim,self.dim1, bias=bo_last)
 
     def forward(self, v):
         v = activation(self.l1(v))
@@ -31,13 +31,14 @@ class OneInputBasis(nn.Module):
 
 
 class node(nn.Module):
-    def __init__(self,dim_output_space_basis,num_sensors,dim1):
+    def __init__(self,dim_output_space_basis,num_sensors,dim1,hidden_dim):
         super().__init__()
         self.dim_output_space_basis = dim_output_space_basis
         self.num_sensors = num_sensors
         self.dim1 = dim1
+        self.hidden_dim = hidden_dim
 
-        self.set_lay = nn.ModuleList([OneInputBasis(self.num_sensors,self.dim1) for _ in range(self.dim_output_space_basis)])
+        self.set_lay = nn.ModuleList([OneInputBasis(self.num_sensors,self.dim1,self.hidden_dim) for _ in range(self.dim_output_space_basis)])
 
 
     def forward(self, v):
@@ -51,21 +52,22 @@ class node(nn.Module):
 
 
 class mesh(nn.Module):
-    def __init__(self, hidden_dim, output_dim):
+    def __init__(self, dim_output_space_basis, output_dim,hidden_dim):
         super().__init__()
-        self.hidden_dim = hidden_dim
+        self.dim_output_space_basis = dim_output_space_basis
         self.output_dim = output_dim
+        self.hidden_dim = hidden_dim
 
         bo_b = True
         bo_last = False
 
-        self.l3 = nn.Linear(1, 100, bias=bo_b)
-        self.l4 = nn.Linear(100, 100, bias=bo_b)
-        self.l5 = nn.Linear(100, 100, bias=bo_b)
-        self.l6 = nn.Linear(100, 100, bias=bo_b)
+        self.l3 = nn.Linear(1,  self.hidden_dim, bias=bo_b)
+        self.l4 = nn.Linear( self.hidden_dim,  self.hidden_dim, bias=bo_b)
+        self.l5 = nn.Linear( self.hidden_dim,  self.hidden_dim, bias=bo_b)
+        self.l6 = nn.Linear( self.hidden_dim,  self.hidden_dim, bias=bo_b)
         # self.l8 = nn.Linear(100, 100, bias=bo_b)
         # self.l9 = nn.Linear(100, 100, bias=bo_b)
-        self.l7 = nn.Linear(100, self.hidden_dim * self.output_dim, bias=bo_last)
+        self.l7 = nn.Linear( self.hidden_dim, self.dim_output_space_basis * self.output_dim, bias=bo_last)
 
     def forward(self, w):
         w = activation(self.l3(w))
@@ -86,13 +88,14 @@ class DeepONet(nn.Module):
         self.input_dim = data_config.x_num
         self.num_sensors = data_config.input_len //data_config.input_step
         self.dim_output_space_basis = model_config.basis_dim
+        self.hidden_dim = model_config.hidden_dim
         self.output_dim = data_config.x_num
 
         # self.toplayer = nn.ModuleList(
         #     [node(self.dim_output_space_basis, self.num_sensors) for _ in range(self.input_dim)])
-        self.top = node(self.dim_output_space_basis,self.num_sensors * self.input_dim, self.output_dim)
+        self.top = node(self.dim_output_space_basis,self.num_sensors * self.input_dim, self.output_dim,self.hidden_dim)
 
-        self.bottom = mesh(self.dim_output_space_basis, 1)
+        self.bottom = mesh(self.dim_output_space_basis, 1, self.hidden_dim)
 
     def forward(self, querypoint, value_at_sensor):
 

@@ -64,7 +64,7 @@ def validate_and_filter_specific_pair(prefix_file_path, data_file_path, expected
 
 if __name__ == '__main__':
 
-    prefix_file_path = "/home/shared/prosepde/diff_bistablereact_1D/diff_bistablereact_1D_50.prefix"
-    data_file_path = "/home/shared/prosepde/diff_bistablereact_1D/diff_bistablereact_1D_50_data.h5"
+    prefix_file_path = "/home/shared/prosepde/conservation_cosflux/conservation_cosflux_50.prefix"
+    data_file_path = "/home/shared/prosepde/conservation_cosflux/conservation_cosflux_50_data.h5"
     expected_count = 50  # Adjust this as per the file name
     validate_and_filter_specific_pair(prefix_file_path, data_file_path, expected_count)

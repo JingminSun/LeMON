@@ -326,29 +326,31 @@ class PROSE_1DPDE_freeze_symbol_encoder(nn.Module):
     def generate(self, **kwargs):
         return self.fwd(**kwargs)
 
-
-class Combine_freeze_encoder(nn.Module):
-    def __init__(self, config,no_inner_model, inner_model, lr_model = None):
+class Combine(nn.Module):
+    def __init__(self, config, no_inner_model, inner_model, lr_model=None):
         super().__init__()
         self.config = config.model
+        self.params = config
         self.no_inner_model = no_inner_model
         self.inner_model = inner_model
         self.learnable_lr = self.config.meta.learnable_lr
         if self.learnable_lr:
             assert lr_model is not None
-            self.lr_model = lr_model
-                #LearningRateModel(self.inner_model.parameters(),
-                                             # input_dim = self.config.symbol_encoder.dim_emb,
-                                             # hidden_dim = self.config.learning_rate.hidden_dim,
-                                             # max_value=config.clip_grad_norm,
-                                             # method=self.config.meta.learnable_lr_method)
+        self.lr_model = lr_model
+
+    def forward(self, *args, **kwargs):
+        return self.inner_model(*args, **kwargs)
 
 
-    def forward(self, mode, data_input, input_times, output_times, symbol_input, symbol_padding_mask=None):
+class Combine_freeze_encoder(Combine):
+    def __init__(self, config,no_inner_model, inner_model, lr_model = None):
+        super().__init__( config,no_inner_model, inner_model, lr_model =lr_model)
+
+    def forward(self, mode, **kwargs):
         if mode == "fwd":
-            return self.fwd(data_input, input_times, output_times, symbol_input, symbol_padding_mask)
+            return self.fwd(**kwargs)
         elif mode == "generate":
-            return self.generate(data_input, input_times, output_times, symbol_input, symbol_padding_mask)
+            return self.generate(**kwargs)
         else:
             raise Exception(f"Unknown mode: {mode}")
 
@@ -367,6 +369,7 @@ class Combine_freeze_encoder(nn.Module):
                                        output_times = output_times,
                                        symbol_encoded = symbol_encoded,
                                        symbol_padding_mask=symbol_padding_mask,)
+
         if self.learnable_lr:
             if self.config.meta.name == "MAML":
                 single_lr = True
@@ -379,38 +382,8 @@ class Combine_freeze_encoder(nn.Module):
         else:
             data_output["lr"] = None
         data_output["symbol_encoded"] = output_noinner["symbol_encoded"]
-        # data_output["data_embeded"] = output_noinner["data_embeded"]
-        # data_output["fused"] = output_noinner["fused"]
         return data_output
-    def generate(self, data_input, input_times, output_times, symbol_input, symbol_padding_mask=None):
-        return self.fwd(data_input, input_times, output_times, symbol_input, symbol_padding_mask)
+    def generate(self, **kwargs):
+        return self.fwd( **kwargs)
 
-# class Combine_freeze_symbol(nn.Module):
-#     def __init__(self, no_inner_model, inner_model):
-#         super().__init__()
-#         self.no_inner_model = no_inner_model
-#         self.inner_model = inner_model
-#
-#     def forward(self, mode, data_input, input_times, output_times, symbol_input, symbol_padding_mask=None):
-#         if mode == "fwd":
-#             return self.fwd(data_input, input_times, output_times, symbol_input, symbol_padding_mask)
-#         elif mode == "generate":
-#             return self.generate(data_input, input_times, output_times, symbol_input, symbol_padding_mask)
-#         else:
-#             raise Exception(f"Unknown mode: {mode}")
-#
-#     def fwd(self, data_input, input_times, output_times, symbol_input, symbol_padding_mask=None):
-#         output_noinner = self.no_inner_model("fwd",
-#                                              symbol_input=symbol_input,
-#                                              symbol_padding_mask=symbol_padding_mask)
-#         data_output = self.inner_model("fwd",
-#                                        data_input=data_input,
-#                                        input_times=input_times,
-#                                        output_times=output_times,
-#                                        symbol_encoded=output_noinner["symbol_encoded"],
-#                                        symbol_padding_mask=symbol_padding_mask, )
-#         data_output["symbol_encoded"] = output_noinner["symbol_encoded"]
-#         return data_output
-#     def generate(self, data_input, input_times, output_times, symbol_input, symbol_padding_mask=None):
-#         return self.fwd(data_input, input_times, output_times, symbol_input, symbol_padding_mask)
 

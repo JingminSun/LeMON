@@ -2,7 +2,7 @@ from logging import getLogger
 import torch
 from tabulate import tabulate
 from collections import OrderedDict
-from .transformer_wrappers import  PROSE_1DPDE, Combine_freeze_encoder, PROSE_1DPDE_inner_data,PROSE_1DPDE_freeze_symbol_encoder
+from .transformer_wrappers import  PROSE_1DPDE, Combine_freeze_encoder, PROSE_1DPDE_inner_data,PROSE_1DPDE_freeze_symbol_encoder,Combine
 from other_models.deeponet import DeepONet
 from .meta_model import MAML, MetaSGD, MAMLAdamW,LearningRateModel
 from .finetune_model import assign_linear_lora
@@ -13,7 +13,7 @@ import numpy as np
 def reload_module(modules,reloaded):
 
     def normalize_key(key):
-        prefixes = ["module.", "inner_model.module.", "no_inner_model.", "_orig_mod."]
+        prefixes = ["module.", "inner_model.module.", "no_inner_model.", "_orig_mod.","lrmodel", "lr_model"]
         for prefix in prefixes:
             if key.startswith(prefix):
                 return key[len(prefix):]
@@ -61,7 +61,7 @@ def build_model(params, model_config, data_config, symbol_env):
             data_config
         )
 
-        if not params.zero_shot_only:
+        if params.meta:
             if model_config.meta.name == "MAML":
                 modules["model"] = MAML(base_model,
                                     model_config.meta.meta_lr,
@@ -103,7 +103,7 @@ def build_model(params, model_config, data_config, symbol_env):
                                     first_order=model_config.meta.first_order,
                                     allow_nograd=model_config.meta.allow_nograd,
                                     allow_unused=model_config.meta.allow_unused)
-        if not params.zero_shot_only:
+        if  params.meta:
             if model_config.meta.learnable_lr:
                 lr_model = LearningRateModel(inner_model.parameters(),
                                 input_dim = model_config.symbol_encoder.dim_emb,
@@ -127,9 +127,9 @@ def build_model(params, model_config, data_config, symbol_env):
             model_config, data_config
         )
 
-        if not params.zero_shot_only:
+        if params.meta:
             if model_config.meta.name == "MAML":
-                modules["model"] = MAML(base_model,
+                model = MAML(base_model,
                                 model_config.meta.meta_lr,
                                     eta=model_config.meta.gd_eta,
                                     first_order=model_config.meta.first_order,
@@ -137,7 +137,7 @@ def build_model(params, model_config, data_config, symbol_env):
                                     clip_norm=params.clip_grad_norm,
                                     allow_unused=model_config.meta.allow_unused)
             elif model_config.meta.name == "MAMLAdamW":
-                modules["model"] = MAMLAdamW(base_model,
+                model = MAMLAdamW(base_model,
                                     model_config.meta.meta_lr,
                                     betas=(0.9, 0.999),
                                     eps=params.optim.get("eps", 1e-8),
@@ -146,11 +146,28 @@ def build_model(params, model_config, data_config, symbol_env):
                                     allow_nograd=model_config.meta.allow_nograd,
                                     allow_unused=model_config.meta.allow_unused)
             elif model_config.meta.name == "MetaSGD":
-                modules["model"] = MetaSGD(base_model,
+                model = MetaSGD(base_model,
                                 model_config.meta.meta_lr,
                                     first_order=model_config.meta.first_order)
+            else: raise  NotImplementedError
+
+            if model_config.meta.learnable_lr:
+
+                inner_model = model
+                no_inner_model = PROSE_1DPDE_freeze_symbol_encoder(
+                    model_config,
+                    symbol_env,
+                    data_config
+                )
+                lr_model = LearningRateModel(inner_model.parameters(),
+                                             input_dim=model_config.symbol_encoder.dim_emb,
+                                             hidden_dim=model_config.learning_rate.hidden_dim,
+                                             max_value=params.clip_grad_norm,
+                                             method=model_config.meta.learnable_lr_method)
+                model = Combine(params,no_inner_model,inner_model,lr_model=lr_model)
         else:
-            modules["model"] = base_model
+            model = base_model
+        modules["model"] = model
     elif name == "FNO":
         output_start =  data_config.input_len if data_config.output_start is None else data_config.output_start
         output_start_eval = data_config.input_len if data_config.output_start_eval is None else data_config.output_start_eval
@@ -159,9 +176,9 @@ def build_model(params, model_config, data_config, symbol_env):
             n_modes=model_config.n_modes, hidden_channels=model_config.hidden_channels,
             in_channels=int(np.ceil(data_config.input_len / data_config.input_step)) , out_channels= int(np.ceil((data_config.t_num-output_start) / data_config.output_step))
         )
-        if not params.zero_shot_only:
+        if params.meta:
             if model_config.meta.name == "MAML":
-                modules["model"] = MAML(base_model,
+                model= MAML(base_model,
                                 model_config.meta.meta_lr,
                                     eta=model_config.meta.gd_eta,
                                     first_order=model_config.meta.first_order,
@@ -169,7 +186,7 @@ def build_model(params, model_config, data_config, symbol_env):
                                         clip_norm=params.clip_grad_norm,
                                     allow_unused=model_config.meta.allow_unused)
             elif model_config.meta.name == "MAMLAdamW":
-                modules["model"] = MAMLAdamW(base_model,
+                model= MAMLAdamW(base_model,
                                     model_config.meta.meta_lr,
                                     betas=(0.9, 0.999),
                                     eps=params.optim.get("eps", 1e-8),
@@ -178,11 +195,30 @@ def build_model(params, model_config, data_config, symbol_env):
                                     allow_nograd=model_config.meta.allow_nograd,
                                     allow_unused=model_config.meta.allow_unused)
             elif model_config.meta.name == "MetaSGD":
-                modules["model"] = MetaSGD(base_model,
+                model= MetaSGD(base_model,
                                 model_config.meta.meta_lr,
                                     first_order=model_config.meta.first_order)
+            else:
+                raise NotImplementedError
+
+            if model_config.meta.learnable_lr:
+
+                inner_model = model
+                no_inner_model = PROSE_1DPDE_freeze_symbol_encoder(
+                    model_config,
+                    symbol_env,
+                    data_config
+                )
+                lr_model = LearningRateModel(inner_model.parameters(),
+                                             input_dim=model_config.symbol_encoder.dim_emb,
+                                             hidden_dim=model_config.learning_rate.hidden_dim,
+                                             max_value=params.clip_grad_norm,
+                                             method=model_config.meta.learnable_lr_method)
+                model = Combine(params,no_inner_model,inner_model,lr_model=lr_model)
+
         else:
-            modules["model"] = base_model
+            model = base_model
+        modules["model"] = model
     else:
         assert False, f"Model {name} hasn't been implemented"
 

@@ -1,16 +1,38 @@
 name: FNO
 
-hidden_channels: 64
+hidden_channels: 128
 
 n_modes:
   - 16
   - 16
 
+dim_emb: 512
+dim_ffn: 2048
+n_head: 8
+dropout: 0
+norm_first: true
+
+
 meta:
   name: MAML
   meta_lr: 0.1
+  learnable_lr: False
+  learnable_lr_method: "mean"
   first_order: True
   allow_unused: True
   allow_nograd: True
   gd_eta: 0
+
 no_text: False
+
+symbol_encoder:
+    n_layer: 4
+    positional_embedding: sinusoidal
+    dim_emb: ${..dim_emb}
+    dim_ffn: ${..dim_ffn}
+    n_head: ${..n_head}
+    dropout: ${..dropout}
+    norm_first: ${..norm_first}
+
+learning_rate:
+  hidden_dim: 128
