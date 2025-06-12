@@ -1,4 +1,4 @@
-# LeMON-PROSE:  Learning to Learn Multi-Operator Networks - Predictiong Operators and Symbolic Expressions
+# LeMON:  Learning to Learn Multi-Operator Networks
 
 This work is based on previous works from our group:
 
