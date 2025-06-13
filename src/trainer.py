@@ -460,6 +460,7 @@ class Trainer(object):
 
 
         symbol = samples["tree_encoded"]
+        bs = symbol.size(0)
 
         symbol_input = symbol[:,1:-1] # Deleting EOS/BOS
         symbol_mask = samples["tree_mask"][:,1:-1]
@@ -521,6 +522,8 @@ class Trainer(object):
         data_input_reshaped = data_input.repeat_interleave(query_locations.shape[1], dim=0)
         query_tensor_reshaped = query_locations.view(-1,1, 1)
         result_tensor_reshaped = data_label.view(-1, 1,self.params.data.x_num)
+
+        tree_structure = [self.symbol_env.equation_encoder.decode(samples["original_tree"][i]) for i in range(bs)]
         dict ={
             "data_input_reshaped": data_input_reshaped,
             "query_tensor_reshaped": query_tensor_reshaped,
@@ -533,7 +536,8 @@ class Trainer(object):
             "loss_weight": loss_weight,
             "data_mask": data_mask,
             "symbol_input": symbol_input,
-            "symbol_mask":symbol_mask
+            "symbol_mask":symbol_mask,
+            "tree_structure": tree_structure
         }
 
         return dict
@@ -555,6 +559,7 @@ class Trainer(object):
         symbol_input = symbol[:,1:-1] # Deleting EOS/BOS
         symbol_mask = samples["tree_mask"][:,1:-1]
 
+        bs = symbol.size(0)
         input_len = self.params.data.input_len
         input_step = self.params.data.input_step
         output_step = self.params.data.output_step
@@ -604,7 +609,7 @@ class Trainer(object):
             #     (torch.reciprocal(loss_weight + eps) / bs).expand_as(data_label).float()
             # )  # (bs, output_len, x_num, x_num, dim)
             loss_weight = to_cuda((torch.reciprocal(loss_weight + eps) / bs).float())  # (bs, 1,  1, dim)
-
+        tree_structure = [self.symbol_env.equation_encoder.decode(samples["original_tree"][i]) for i in range(bs)]
         dict ={
             "data_input": data_input,
             "data_label": data_label,
@@ -615,7 +620,8 @@ class Trainer(object):
             "data_mask": data_mask,
             "loss_weight": loss_weight,
             "symbol_input": symbol_input,
-            "symbol_mask": symbol_mask
+            "symbol_mask": symbol_mask,
+            "tree_structure": tree_structure
         }
 
         return dict

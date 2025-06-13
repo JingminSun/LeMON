@@ -95,13 +95,16 @@ def custom_collate(max_data_dim,symbol_env):
                     collated_tree, lengths,max_length = collate_symbols(batch_tree,symbol_env)
                     res[k] = collated_tree
                     res["tree_mask"] = get_padding_mask(lengths,max_length, beos_added = True)
+                    res["original_tree"] = batch_tree
                 else:
                     res[k] = []
                     res["tree_mask"] = []
+                    res["original_tree"] = []
                     for d in batch:
                         cur_data = d[k]
                         collated_tree, lengths,max_length = collate_symbols(cur_data,symbol_env)
                         res[k].append(collated_tree)
+                        res["original_tree"].append(cur_data)
                         res["tree_mask"].append(get_padding_mask(lengths,max_length, beos_added = True))
 
             elif isinstance(batch[0][k],dict):

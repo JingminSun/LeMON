@@ -151,6 +151,8 @@ class Evaluator(object):
                                                         train=False) if self.params.model.name == "DeepONet" else self.trainer.prepare_data(
                             samples_query, train=False)
                     )
+                    if params.print_outputs:
+                        logger.info("{}: {}   {}\n".format(type, idx,dict_query["tree_structure"][0]))
                 else:
 
                     dict_support = {}
@@ -199,7 +201,7 @@ class Evaluator(object):
 
                 if not params.zero_shot_only:
                     if self.params.model.name == "DeepONet":
-                        learner = self.deeponet_adapt(model,dict_support)
+                        learner, lr = self.deeponet_adapt(model,dict_support)
                         with torch.cuda.amp.autocast(enabled=bool(params.amp), dtype=torch.bfloat16):
                             output = learner(
                                 querypoint=dict_query["query_tensor_reshaped"],
@@ -211,13 +213,13 @@ class Evaluator(object):
 
                     elif self.params.model.name == "FNO":
 
-                        learner = self.fno_adapt(model,dict_support)
+                        learner, lr = self.fno_adapt(model,dict_support)
                         data_output_few_shot = learner(
                             dict_query["data_input"],
                         )  # (bs, output_len, x_num, data_dim
                     else:
 
-                        learner = self.freeze_symbol_adapt(model,dict_support) if self.params.model.name == "prose_freeze_symbol" else self.full_adapt(model,dict_support)
+                        learner, lr = self.freeze_symbol_adapt(model,dict_support) if self.params.model.name == "prose_freeze_symbol" else self.full_adapt(model,dict_support)
                         with torch.cuda.amp.autocast(enabled=bool(params.amp), dtype=torch.bfloat16):
                             output_dict_few_shot = learner(
                                 "generate",
@@ -234,6 +236,12 @@ class Evaluator(object):
                     data_loss_few_shot = data_loss_fn(data_output_few_shot, data_label, dict_query["data_mask"], dict_query["loss_weight"])
 
                     results["data_loss_few_shot"].extend(data_loss_few_shot)
+                    if  params.use_wandb:
+                        wandb.log(
+                            {"val": {"epoch": self.trainer.epoch,
+                                     f"{type}_{idx}_lr": lr}}
+                        )
+
                 else:
                     data_output_few_shot = None
 
@@ -271,44 +279,46 @@ class Evaluator(object):
                         results[keys].append(cur_result_zero_shot[k])
                     else:
                         results[keys].extend(cur_result_zero_shot[k])
-                if params.print_outputs:
-                    # plot all outputs
-                    if not params.zero_shot_only:
-                        data_output_few_shot = data_output_few_shot.float().numpy(
-                            force=True)  # (bs, output_len//output_step, x_num,data_dim)
-                    else:
-                        data_output_few_shot = None
+                # if params.print_outputs:
+                #     # plot all outputs
+                #     if not params.zero_shot_only:
+                #         data_output_few_shot = data_output_few_shot.float().numpy(
+                #             force=True)  # (bs, output_len//output_step, x_num,data_dim)
+                #     else:
+                #         data_output_few_shot = None
+                #
+                #     data_output_zero_shot = data_output_zero_shot.float().numpy(
+                #         force=True)  # (bs, output_len//output_step, x_num,data_dim)
+                #     # data_all = samples["data"].numpy(
+                #     #     force=True)  # (bs, input_len + output_len, x_num,  data_dim)
+                #     for i in range(num):
+                #         if not params.zero_shot_only:
+                #             index = idx * bs + i + self.params.data.num_support
+                #             plot_title = "Type {} | Idx {} | zero {:.4f} | few {:.4f}".format(type, index,
+                #                                                         cur_result_zero_shot["_l2_error"][i],  cur_result_few_shot["_l2_error"][i])
+                #         else:
+                #             index = idx * params.batch_size_eval + i
+                #             plot_title = "Type {} | Idx {} | zero {:.4f}".format(type,index,cur_result_zero_shot["_l2_error"][i])
+                #
+                #
+                #         plot_1d_pde(
+                #             data_output_zero_shot[i],
+                #             data_output_few_shot[i] if data_output_few_shot is not None else None,
+                #             samples["t"][i],
+                #             samples["x"][i],
+                #             data_all[i],
+                #             params.data.input_len,
+                #             plot_title,
+                #             filename=f"{type}_plot_{index}",
+                #             folder=save_folder,
+                #             dim=(params.data[type.split("%")[0]]).dim,
+                #             input_step = params.data.input_step,
+                #             output_step = params.data.output_step,
+                #             output_start =  params.data.input_len if params.data.output_start_eval is None else params.data.output_start_eval
+                #         )
 
-                    data_output_zero_shot = data_output_zero_shot.float().numpy(
-                        force=True)  # (bs, output_len//output_step, x_num,data_dim)
-                    data_all = samples["data"].numpy(
-                        force=True)  # (bs, input_len + output_len, x_num,  data_dim)
-                    for i in range(num):
-                        if not params.zero_shot_only:
-                            index = idx * bs + i + self.params.data.num_support
-                            plot_title = "Type {} | Idx {} | zero {:.4f} | few {:.4f}".format(type, index,
-                                                                        cur_result_zero_shot["_l2_error"][i],  cur_result_few_shot["_l2_error"][i])
-                        else:
-                            index = idx * params.batch_size_eval + i
-                            plot_title = "Type {} | Idx {} | zero {:.4f}".format(type,index,cur_result_zero_shot["_l2_error"][i])
 
-
-                        plot_1d_pde(
-                            data_output_zero_shot[i],
-                            data_output_few_shot[i] if data_output_few_shot is not None else None,
-                            samples["t"][i],
-                            samples["x"][i],
-                            data_all[i],
-                            params.data.input_len,
-                            plot_title,
-                            filename=f"{type}_plot_{index}",
-                            folder=save_folder,
-                            dim=(params.data[type.split("%")[0]]).dim,
-                            input_step = params.data.input_step,
-                            output_step = params.data.output_step,
-                            output_start =  params.data.input_len if params.data.output_start_eval is None else params.data.output_start_eval
-                        )
-
+                data_all = samples["data"].numpy(force=True)
                 if params.log_eval_plots > 0 and num_plotted < params.log_eval_plots:
                     # only plot the first element
                     if (isinstance(data_output_few_shot, np.ndarray)  or (data_output_few_shot is None and params.zero_shot_only) )and isinstance(data_output_zero_shot, np.ndarray):
@@ -354,6 +364,10 @@ class Evaluator(object):
                             {"val": {"epoch": self.trainer.epoch,
                                      f"{type}_plot_{num_plotted}": wandb.Image(path)}}
                         )
+                        # if not params.zero_shot_only:
+                        #     wandb.log(
+                        #         {"val": {f"{type}_lr": lr}}
+                        #     )
 
                     num_plotted += 1
 
@@ -486,7 +500,7 @@ class Evaluator(object):
                                                                   "loss_weight"])
                 learner.adapt(support_data_loss, lr=self.params.model.meta.meta_lr)
 
-        return learner
+        return learner, self.params.model.meta.meta_lr
 
     def freeze_symbol_adapt(self,model, support_dict):
         params = self.params
@@ -542,7 +556,7 @@ class Evaluator(object):
                                                                   "loss_weight"])
                 learner.adapt(support_data_loss, lr=lr)
 
-        return  Combine_freeze_encoder(params, model.no_inner_model, learner, lr_model=model.lr_model)
+        return  Combine_freeze_encoder(params, model.no_inner_model, learner, lr_model=model.lr_model), lr
 
 
     def deeponet_adapt(self,model,dict_support):
@@ -583,7 +597,7 @@ class Evaluator(object):
                                                       dict_support["data_mask"], dict_support["loss_weight"])
 
             learner.adapt(support_data_loss, lr=lr)
-        return learner
+        return learner, lr
 
     def fno_adapt(self,model,dict_support):
         params = self.params
@@ -621,5 +635,5 @@ class Evaluator(object):
                                                   dict_support["data_mask"], dict_support["loss_weight"])
 
             learner.adapt(support_data_loss, lr=lr)
-        return learner
+        return learner, lr
 
