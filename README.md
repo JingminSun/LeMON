@@ -39,12 +39,8 @@ However, if you want to save space/ your evaluation dataset and training dataset
     bash scripts/fno.sh
     bash scripts/prose_onlyqc.sh
 
-### LoRA fine-tuning vs Regular fine-tuning:
-LoRA code is based on [this_tutorial](https://lightning.ai/lightning-ai/studios/code-lora-from-scratch).
 
-    bash scripts/loraexperiments.sh
+### LeMON experiments:
+LeMON code is based on [learn2learn library](https://github.com/learnables/learn2learn/).
 
-### PAML experiments:
-PAML code is based on [learn2learn library](https://github.com/learnables/learn2learn/).
-
-    bash scripts/PAML.sh
+    bash scripts/learnable_lr.sh

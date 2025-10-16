@@ -21,3 +21,8 @@ scripts/new.sh
 scripts/notext.sh
 scripts/plot.sh
 scripts/run_ft.sh
+scripts/run.sh
+scripts/run2.sh
+scripts/run3.sh
+scripts/tmp.sh
+scripts/PAML.sh
