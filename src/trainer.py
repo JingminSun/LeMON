@@ -341,7 +341,7 @@ class Trainer(object):
         if not self.params.is_master:
             return
         for metric, biggest in self.metrics:
-            _metric = metric + "_zero_shot"
+            _metric = metric
             if prefix is not None:
                 _metric = prefix + "_" + _metric
             if suffix is not None:
@@ -408,6 +408,13 @@ class Trainer(object):
                 # logger.info(f"Reached end of dataloader...")
                 self.data_iters[key] = iter(self.dataloaders[key])
                 batch = next(self.data_iters[key])
+            A = batch["tree_encoded"]
+            B = batch["tree_encoded"][0]
+            try:
+                # print(A)
+                assert (A == B).all(dim=0).all()
+            except:
+                print("Data does not match:", key)
             total_samples = len(batch['task'])
             random_indices = self.datasets[key].rng.permutation(total_samples)
             support_indices = random_indices[:self.params.data.num_support]
@@ -452,6 +459,11 @@ class Trainer(object):
         query_locations = samples["query"]
 
 
+        symbol = samples["tree_encoded"]
+        bs = symbol.size(0)
+
+        symbol_input = symbol[:,1:-1] # Deleting EOS/BOS
+        symbol_mask = samples["tree_mask"][:,1:-1]
 
         input_len = self.params.data.input_len
         input_step = self.params.data.input_step
@@ -465,8 +477,8 @@ class Trainer(object):
         # Example of data_input and sensors
         data_input = data[:,:input_len:input_step, :]
 
-        data_input, data_label,data_mask,query_locations = to_cuda(
-            (data_input, data_label,data_mask,query_locations)
+        data_input, data_label,data_mask,query_locations,symbol_input,symbol_mask= to_cuda(
+            (data_input, data_label,data_mask,query_locations,symbol_input,symbol_mask)
         )
 
 
@@ -510,6 +522,8 @@ class Trainer(object):
         data_input_reshaped = data_input.repeat_interleave(query_locations.shape[1], dim=0)
         query_tensor_reshaped = query_locations.view(-1,1, 1)
         result_tensor_reshaped = data_label.view(-1, 1,self.params.data.x_num)
+
+        tree_structure = [self.symbol_env.equation_encoder.decode(samples["original_tree"][i]) for i in range(bs)]
         dict ={
             "data_input_reshaped": data_input_reshaped,
             "query_tensor_reshaped": query_tensor_reshaped,
@@ -520,7 +534,10 @@ class Trainer(object):
             "std": std,
             "query_point": query_locations,
             "loss_weight": loss_weight,
-            "data_mask": data_mask
+            "data_mask": data_mask,
+            "symbol_input": symbol_input,
+            "symbol_mask":symbol_mask,
+            "tree_structure": tree_structure
         }
 
         return dict
@@ -542,6 +559,7 @@ class Trainer(object):
         symbol_input = symbol[:,1:-1] # Deleting EOS/BOS
         symbol_mask = samples["tree_mask"][:,1:-1]
 
+        bs = symbol.size(0)
         input_len = self.params.data.input_len
         input_step = self.params.data.input_step
         output_step = self.params.data.output_step
@@ -591,7 +609,7 @@ class Trainer(object):
             #     (torch.reciprocal(loss_weight + eps) / bs).expand_as(data_label).float()
             # )  # (bs, output_len, x_num, x_num, dim)
             loss_weight = to_cuda((torch.reciprocal(loss_weight + eps) / bs).float())  # (bs, 1,  1, dim)
-
+        tree_structure = [self.symbol_env.equation_encoder.decode(samples["original_tree"][i]) for i in range(bs)]
         dict ={
             "data_input": data_input,
             "data_label": data_label,
@@ -602,95 +620,13 @@ class Trainer(object):
             "data_mask": data_mask,
             "loss_weight": loss_weight,
             "symbol_input": symbol_input,
-            "symbol_mask": symbol_mask
+            "symbol_mask": symbol_mask,
+            "tree_structure": tree_structure
         }
 
         return dict
 
-    # def prepare_meta_data(self,samples,train = True):
-    #
-    #     """
-    #     Prepare data for training. (Split entire sequence into input and output, generate loss mask, move to cuda, etc.)
-    #
-    #     samples: data:         Tensor     (num_task(bs), num_data, max_len, x_num,  dim)
-    #              data_mask:    BoolTensor (num_task(bs), dim)
-    #              t:            Tensor     (num_task(bs), num_data, max_len)
-    #
-    #     """
-    #
-    #     data = samples["data"]
-    #     data_mask = samples["data_mask"][:, None, None, None, :]  # (bs, 1, 1, 1, dim)
-    #     t = samples["t"]
-    #     symbol = samples["tree_encoded"]
-    #
-    #     symbol_input = [sym[:, 1:-1] for sym in symbol]  # Deleting EOS/BOS
-    #     symbol_mask = [mask[:, 1:-1] for mask in samples["tree_mask"]]
-    #
-    #     input_len = self.params.input_len
-    #     input_step = self.params.input_step
-    #     output_step = self.params.output_step
-    #     if train or output_step == 1:
-    #         output_start = input_len
-    #     else:
-    #         output_start = input_len  + 1
-    #     data_input = data[:, :, :input_len:input_step]  # (bs, num_data,input_len, x_num,  dim)
-    #     data_label = data[:, :, output_start::output_step]  # (bs, num_data, output_len, x_num,  dim)
-    #     input_times = t[:,:, :input_len:input_step]  # (bs, num_data,input_len)
-    #     output_times = t[:,:, output_start::output_step]  # (bs, num_data,output_len)
-    #
-    #     data_input, data_label, input_times, output_times, data_mask, symbol_input, symbol_mask = to_cuda(
-    #         (data_input, data_label, input_times, output_times, data_mask, symbol_input, symbol_mask)
-    #     )
-    #
-    #     if self.params.normalize:
-    #         mean = torch.mean(data_input, axis=(2,3), keepdim=True)  # (bs, num_data, 1, 1, dim)
-    #         std = torch.std(data_input, axis=(2, 3), keepdim=True)  # (bs, num_data,1, 1, dim)
-    #
-    #         eps = 1e-6
-    #         data_input = (data_input - mean) / (std + eps)
-    #         data_label = (data_label - mean) / (std + eps)  # use same mean and std
-    #
-    #     else:
-    #         mean = 0
-    #         std = 1
-    #
-    #     # prepare weights for loss function
-    #     eps = 1e-5
-    #     if self.params.loss_weight is None or self.params.loss_weight == "none":
-    #         loss_weight = None
-    #     elif self.params.loss_weight == "l2":
-    #         # reweight by L2 norm squared
-    #         loss_weight = torch.linalg.vector_norm(data_label, dim=(2, 3),
-    #                                                keepdim=True) ** 2  # (bs, num_data, 1, 1, dim)
-    #     elif self.params.loss_weight == "linfty":
-    #         # reweight by L-infinity norm
-    #         loss_weight, _ = torch.max(torch.abs(data_label), dim=(2, 3),
-    #                                    keepdim=True)  # (bs, num_data, 1, 1, dim)
-    #     else:
-    #         assert False, f"Unknown reweight type: {self.params.loss_weight}"
-    #
-    #     if loss_weight is not None:
-    #         bs = np.single(data_label.size(0))
-    #         # loss_weight = to_cuda(
-    #         #     (torch.reciprocal(loss_weight + eps) / bs).expand_as(data_label).float()
-    #         # )  # (bs, output_len, x_num, x_num, dim)
-    #         loss_weight = to_cuda(
-    #             (torch.reciprocal(loss_weight + eps) / bs).float())  # (bs, num_data, 1,  1, dim)
-    #
-    #     dict = {
-    #         "data_input": data_input,
-    #         "data_label": data_label,
-    #         "mean": mean,
-    #         "std": std,
-    #         "input_times": input_times,
-    #         "output_times": output_times,
-    #         "data_mask": data_mask,
-    #         "loss_weight": loss_weight,
-    #         "symbol_input": symbol_input,
-    #         "symbol_mask": symbol_mask
-    #     }
-    #
-    #     return dict
+
 
     def iter(self):
         """
@@ -703,12 +639,8 @@ class Trainer(object):
         model.train()
 
         if params.model.name == "DeepONet":
-            # assert not params.meta, "Set meta=0 for DeepONet, not implemented"
-            # self.deeponet_update(model)
             self.full_meta_deeponet_updates(model) if params.meta else self.deeponet_update(model)
         elif params.model.name == "FNO":
-            # assert not params.meta, "Set meta=0 for FNO, not implemented"
-            # self.fno_update(model)
             self.full_meta_fno_updates(model) if params.meta else self.fno_update(model)
         else:
             if  not params.meta:
@@ -751,8 +683,6 @@ class Trainer(object):
             else:
                 if self.params.model.name == "prose_freeze_symbol":
                     self.freezesymbol_meta_updates(model)
-                # elif self.params.model.name == "prose_freezed_symbol":
-                #     self.freeze_meta_updates_symbol(model)
                 else:
                     self.full_meta_updates(model)
 
@@ -788,18 +718,35 @@ class Trainer(object):
         query_data_loss = to_cuda(torch.tensor(0.0).float())
         streams = [torch.cuda.Stream() for _ in range(params.batch_size_task)]
         for ii in range(params.batch_size_task):
-            samples_support, samples_query = self.get_task()
-            dict_support = self.prepare_data_deepo(
-                samples_support
-            )
-            dict_query = self.prepare_data_deepo(
-                samples_query
-            )
-
-            learner = model.clone()
-            learner = to_cuda(learner)
 
             with torch.cuda.stream(streams[ii]):
+                samples_support, samples_query = self.get_task()
+                dict_support = self.prepare_data_deepo(
+                    samples_support
+                )
+                dict_query = self.prepare_data_deepo(
+                    samples_query
+                )
+
+                if self.params.model.meta.learnable_lr:
+                    learner = model.inner_model.clone()
+                    learner = to_cuda(learner)
+                    output_noinner = model.no_inner_model(
+                        "fwd",
+                        symbol_input=dict_support["symbol_input"],
+                        symbol_padding_mask=dict_support["symbol_mask"], )
+                    if params.model.meta.name == "MAML":
+                        single_lr = True
+                    else:
+                        single_lr = False
+                    A = output_noinner["symbol_encoded"]
+                    B = output_noinner["symbol_encoded"][0]
+                    lr = model.lr_model(B, single_lr=single_lr)
+                else:
+                    learner = model.clone()
+                    learner = to_cuda(learner)
+                    lr = None
+
                 for _ in range(params.meta_step):
                     with torch.cuda.amp.autocast(enabled=bool(params.amp), dtype=torch.bfloat16):
                         output = learner(
@@ -811,7 +758,7 @@ class Trainer(object):
                         data_output = output.reshape(params.data.num_support, num_output_t, params.data.x_num, 1)
                         support_data_loss = self.data_loss_fn(data_output, dict_support["data_label"],dict_support["data_mask"],dict_support["loss_weight"])
 
-                    learner.adapt(support_data_loss)
+                    learner.adapt(support_data_loss,lr=lr)
                 learner.eval()
 
                 with torch.cuda.amp.autocast(enabled=bool(params.amp), dtype=torch.bfloat16):
@@ -859,17 +806,34 @@ class Trainer(object):
         streams = [torch.cuda.Stream() for _ in range(params.batch_size_task)]
 
         for ii in range(params.batch_size_task):
-            samples_support, samples_query = self.get_task()
-            dict_support = self.prepare_data(
-                samples_support
-            )
-            dict_query = self.prepare_data(
-                samples_query
-            )
 
-            learner = model.clone()
-            learner = to_cuda(learner)
             with torch.cuda.stream(streams[ii]):
+                samples_support, samples_query = self.get_task()
+                dict_support = self.prepare_data(
+                    samples_support
+                )
+                dict_query = self.prepare_data(
+                    samples_query
+                )
+
+                if self.params.model.meta.learnable_lr:
+                    learner = model.inner_model.clone()
+                    learner = to_cuda(learner)
+                    output_noinner = model.no_inner_model(
+                        "fwd",
+                        symbol_input=dict_support["symbol_input"],
+                        symbol_padding_mask=dict_support["symbol_mask"], )
+                    if params.model.meta.name == "MAML":
+                        single_lr = True
+                    else:
+                        single_lr = False
+                    A = output_noinner["symbol_encoded"]
+                    B = output_noinner["symbol_encoded"][0]
+                    lr = model.lr_model(B, single_lr=single_lr)
+                else:
+                    learner = model.clone()
+                    learner = to_cuda(learner)
+                    lr=None
                 for _ in range(params.meta_step):
                     # with torch.cuda.amp.autocast(enabled=bool(params.amp), dtype=torch.bfloat16):
                     output = learner(
@@ -879,7 +843,7 @@ class Trainer(object):
                     num_output_t = (params.data.t_num - output_start + 1) // self.params.data.output_step
                     data_output = output.reshape(params.data.num_support, num_output_t, params.data.x_num, 1)
                     support_data_loss = self.data_loss_fn(data_output, dict_support["data_label"], dict_support["data_mask"],dict_support["loss_weight"])
-                    learner.adapt(support_data_loss)
+                    learner.adapt(support_data_loss, lr=lr)
                 learner.eval()
 
                 output = learner(
@@ -896,44 +860,7 @@ class Trainer(object):
         # optimize
         self.optimizer.zero_grad()
         self.optimize(query_data_loss)
-    # def full_meta_oneupdate(self,params, model, dict_supports, dict_querys, data_loss_fn, to_cuda, ii):
-    #     dict_support = dict_supports[ii]
-    #     dict_query = dict_querys[ii]
-    #
-    #     learner = model.clone()
-    #     learner = to_cuda(learner)
-    #
-    #     for _ in range(params.meta_step):
-    #         with torch.cuda.amp.autocast(enabled=bool(params.amp), dtype=torch.bfloat16):
-    #             output_dict = learner(
-    #                 "fwd",
-    #                 data_input=dict_support["data_input"],
-    #                 input_times=dict_support["input_times"][..., None],
-    #                 output_times=dict_support["output_times"][..., None],
-    #                 symbol_input=dict_support["symbol_input"],
-    #                 symbol_padding_mask=dict_support["symbol_mask"],
-    #             )
-    #             data_output = output_dict["data_output"]
-    #             support_data_loss = data_loss_fn(data_output, dict_support["data_label"],
-    #                                              dict_support["data_mask"],
-    #                                              dict_support["loss_weight"])
-    #             learner.adapt(support_data_loss)
-    #
-    #     learner.eval()
-    #     with torch.cuda.amp.autocast(enabled=bool(params.amp), dtype=torch.bfloat16):
-    #         output_dict = learner(
-    #             "fwd",
-    #             data_input=dict_query["data_input"],
-    #             input_times=dict_query["input_times"][..., None],
-    #             output_times=dict_query["output_times"][..., None],
-    #             symbol_input=dict_query["symbol_input"],
-    #             symbol_padding_mask=dict_query["symbol_mask"],
-    #         )  # (bs, output_len, x_num, data_dim)
-    #         data_output = output_dict["data_output"]
-    #         query_data_loss = data_loss_fn(data_output, dict_query["data_label"],
-    #                                        dict_query["data_mask"],
-    #                                        dict_query["loss_weight"])
-    #     return query_data_loss
+
     def full_meta_updates(self,model):
         params = self.params
         query_data_loss = to_cuda(torch.tensor(0.0).float())
@@ -948,18 +875,18 @@ class Trainer(object):
             # Set up multiple CUDA streams
             streams = [torch.cuda.Stream() for _ in range(params.batch_size_task)]
             for ii in range(params.batch_size_task):
-                samples_support, samples_query = self.get_task()
-                dict_support = self.prepare_data(
-                    samples_support
-                )
-                dict_query = self.prepare_data(
-                    samples_query
-                )
-
-                learner = model.clone()
-                learner = to_cuda(learner)
-
                 with torch.cuda.stream(streams[ii]):
+                    samples_support, samples_query = self.get_task()
+                    dict_support = self.prepare_data(
+                        samples_support
+                    )
+                    dict_query = self.prepare_data(
+                        samples_query
+                    )
+
+                    learner = model.clone()
+                    learner = to_cuda(learner)
+
                     for _ in range(params.meta_step):
                         with torch.cuda.amp.autocast(enabled=bool(params.amp), dtype=torch.bfloat16):
                             output_dict = learner(
@@ -992,30 +919,130 @@ class Trainer(object):
                                                          dict_query["loss_weight"])
             # Ensure all streams have completed before proceeding
             torch.cuda.synchronize()
-            '''
-            dict_supports = []
-            dict_querys = []
-            for ii in range(params.batch_size):
-                samples_support, samples_query = self.get_task()
-                dict_support = self.prepare_data(samples_support)
-                dict_query = self.prepare_data(samples_query)
-                dict_supports.append(dict_support)
-                dict_querys.append(dict_query)
-
-            with concurrent.futures.ProcessPoolExecutor() as executor:
-                futures = [
-                    executor.submit(self.full_meta_oneupdate, params, model,dict_supports, dict_querys, self.data_loss_fn, to_cuda, ii)
-                    for ii in range(params.batch_size)]
-
-                for future in concurrent.futures.as_completed(futures):
-                    query_data_loss += future.result()
-            '''
             query_data_loss /= params.batch_size
             self.data_loss += query_data_loss.item()
             # optimize
             self.optimizer.zero_grad()
             self.optimize(query_data_loss)
-
+    #
+    # def meta_learnlr_deeponet_updates(self,model):
+    #     params = self.params
+    #     query_data_loss = to_cuda(torch.tensor(0.0).float())
+    #     streams = [torch.cuda.Stream() for _ in range(params.batch_size_task)]
+    #     for ii in range(params.batch_size_task):
+    #
+    #         with torch.cuda.stream(streams[ii]):
+    #             samples_support, samples_query = self.get_task()
+    #             dict_support = self.prepare_data_deepo(
+    #                 samples_support
+    #             )
+    #             dict_query = self.prepare_data_deepo(
+    #                 samples_query
+    #             )
+    #
+    #             learner = model.inner_model.clone()
+    #             learner = to_cuda(learner)
+    #             output_noinner = model.no_inner_model(
+    #                 "fwd",
+    #                 symbol_input=dict_support["symbol_input"],
+    #                 symbol_padding_mask=dict_support["symbol_mask"], )
+    #             if params.model.meta.name == "MAML":
+    #                 single_lr = True
+    #             else:
+    #                 single_lr = False
+    #             A = output_noinner["symbol_encoded"]
+    #             B = output_noinner["symbol_encoded"][0]
+    #
+    #             lr = model.lr_model(B, single_lr=single_lr)
+    #             learner = to_cuda(learner)
+    #
+    #             for _ in range(params.meta_step):
+    #                 with torch.cuda.amp.autocast(enabled=bool(params.amp), dtype=torch.bfloat16):
+    #                     output = learner(
+    #                     querypoint = dict_support["query_tensor_reshaped"],
+    #                     value_at_sensor= dict_support["data_input_reshaped"],
+    #                         )
+    #                     output_start = self.params.data.input_len if self.params.data.output_start is None else self.params.data.output_start
+    #                     num_output_t = (params.data.t_num - output_start + 1) // self.params.data.output_step
+    #                     data_output = output.reshape(params.data.num_support, num_output_t, params.data.x_num, 1)
+    #                     support_data_loss = self.data_loss_fn(data_output, dict_support["data_label"],dict_support["data_mask"],dict_support["loss_weight"])
+    #                 learner.adapt(support_data_loss, lr=lr)
+    #             learner.eval()
+    #
+    #             with torch.cuda.amp.autocast(enabled=bool(params.amp), dtype=torch.bfloat16):
+    #                 output = learner(
+    #                     querypoint=dict_query["query_tensor_reshaped"],
+    #                     value_at_sensor=dict_query["data_input_reshaped"],
+    #                 )
+    #                 output_start = self.params.data.input_len if self.params.data.output_start is None else self.params.data.output_start
+    #                 num_output_t = (params.data.t_num - output_start + 1) // self.params.data.output_step
+    #                 data_output = output.reshape(params.data.num_query, num_output_t, params.data.x_num, 1)
+    #                 query_data_loss += self.data_loss_fn(data_output, dict_query["data_label"],
+    #                                                   dict_query["data_mask"], dict_query["loss_weight"])
+    #     torch.cuda.synchronize()
+    #
+    #     query_data_loss /= params.batch_size
+    #     self.data_loss += query_data_loss.item()
+    #     # optimize
+    #     self.optimizer.zero_grad()
+    #     self.optimize(query_data_loss)
+    # def meta_learnlr_fno_updates(self,model):
+    #     params = self.params
+    #     query_data_loss = to_cuda(torch.tensor(0.0).float())
+    #     streams = [torch.cuda.Stream() for _ in range(params.batch_size_task)]
+    #
+    #     for ii in range(params.batch_size_task):
+    #
+    #         with torch.cuda.stream(streams[ii]):
+    #             samples_support, samples_query = self.get_task()
+    #             dict_support = self.prepare_data(
+    #                 samples_support
+    #             )
+    #             dict_query = self.prepare_data(
+    #                 samples_query
+    #             )
+    #
+    #             learner = model.inner_model.clone()
+    #             learner = to_cuda(learner)
+    #             output_noinner = model.no_inner_model(
+    #                 "fwd",
+    #                 symbol_input=dict_support["symbol_input"],
+    #                 symbol_padding_mask=dict_support["symbol_mask"], )
+    #             if params.model.meta.name == "MAML":
+    #                 single_lr = True
+    #             else:
+    #                 single_lr = False
+    #             A = output_noinner["symbol_encoded"]
+    #             B = output_noinner["symbol_encoded"][0]
+    #
+    #             lr = model.lr_model(B, single_lr=single_lr)
+    #             for _ in range(params.meta_step):
+    #                 # with torch.cuda.amp.autocast(enabled=bool(params.amp), dtype=torch.bfloat16):
+    #                 output = learner(
+    #                     dict_support["data_input"],
+    #                 )  # (bs, output_len, x_num, data_dim)
+    #                 output_start = self.params.data.input_len if self.params.data.output_start is None else self.params.data.output_start
+    #                 num_output_t = (params.data.t_num - output_start + 1) // self.params.data.output_step
+    #                 data_output = output.reshape(params.data.num_support, num_output_t, params.data.x_num, 1)
+    #                 support_data_loss = self.data_loss_fn(data_output, dict_support["data_label"], dict_support["data_mask"],dict_support["loss_weight"])
+    #
+    #                 learner.adapt(support_data_loss, lr=lr)
+    #             learner.eval()
+    #
+    #             output = learner(
+    #                 dict_query["data_input"],
+    #             )  # (bs, output_len, x_num, data_dim)
+    #             output_start = self.params.data.input_len if self.params.data.output_start is None else self.params.data.output_start
+    #             num_output_t = (params.data.t_num - output_start + 1) // self.params.data.output_step
+    #             data_output = output.reshape(params.data.num_query, num_output_t, params.data.x_num, 1)
+    #             query_data_loss += self.data_loss_fn(data_output, dict_query["data_label"], dict_query["data_mask"],dict_query["loss_weight"])
+    #     torch.cuda.synchronize()
+    #
+    #     query_data_loss /= params.batch_size
+    #     self.data_loss += query_data_loss.item()
+    #     # optimize
+    #     self.optimizer.zero_grad()
+    #     self.optimize(query_data_loss)
 
     def freezesymbol_meta_updates(self,model):
         params = self.params
@@ -1031,24 +1058,35 @@ class Trainer(object):
 
             streams = [torch.cuda.Stream() for _ in range(params.batch_size_task)]
             for ii in range(params.batch_size_task):
-                samples_support, samples_query = self.get_task()
-                dict_support = self.prepare_data(
-                    samples_support
-                )
-                dict_query = self.prepare_data(
-                    samples_query
-                )
-
-                learner = model.inner_model.clone()
-                learner = to_cuda(learner)
-                output_noinner = model.no_inner_model(
-                    "fwd",
-                    # data_input= dict_support["data_input"],
-                    # input_times= dict_support["input_times"][..., None],
-                    symbol_input=dict_support["symbol_input"],
-                    symbol_padding_mask=dict_support["symbol_mask"],)
 
                 with torch.cuda.stream(streams[ii]):
+                    samples_support, samples_query = self.get_task()
+                    dict_support = self.prepare_data(
+                        samples_support
+                    )
+                    dict_query = self.prepare_data(
+                        samples_query
+                    )
+
+                    learner = model.inner_model.clone()
+                    learner = to_cuda(learner)
+                    output_noinner = model.no_inner_model(
+                        "fwd",
+                        symbol_input=dict_support["symbol_input"],
+                        symbol_padding_mask=dict_support["symbol_mask"],)
+                    if not  model.learnable_lr:
+                        symbol_encoded = output_noinner["symbol_encoded"]
+                        lr = None
+                    else:
+                        symbol_encoded = None
+
+                        if params.model.meta.name == "MAML":
+                            single_lr = True
+                        else:
+                            single_lr = False
+                        A = output_noinner["symbol_encoded"]
+                        B = output_noinner["symbol_encoded"][0]
+                        lr = model.lr_model(B, single_lr=single_lr)
                     for _ in range(params.meta_step):
                         with torch.cuda.amp.autocast(enabled=bool(params.amp), dtype=torch.bfloat16):
                             output_dict = learner(
@@ -1056,22 +1094,17 @@ class Trainer(object):
                                 data_input=dict_support["data_input"],
                                 input_times= dict_support["input_times"][..., None],
                                 output_times=dict_support["output_times"][..., None],
-                                symbol_encoded=output_noinner["symbol_encoded"],
+                                symbol_encoded=symbol_encoded,
                                 symbol_padding_mask=dict_support["symbol_mask"],
                             )
 
                             support_data_loss = self.data_loss_fn(output_dict["data_output"], dict_support["data_label"],
                                                                   dict_support["data_mask"],
                                                                   dict_support["loss_weight"])
-                            learner.adapt(support_data_loss)
+                            learner.adapt(support_data_loss, lr=lr)
                     learner.eval()
 
-                    task_model = Combine_freeze_encoder( model.no_inner_model, learner)
-                    # output_noinner = model.no_inner_model( "fwd",
-                    #                                        # data_input=dict_query["data_input"],
-                    #                                        # input_times=dict_query["input_times"][ ..., None],
-                    #                                        symbol_input=dict_query["symbol_input"],
-                    #                                        symbol_padding_mask=dict_query["symbol_mask"])
+                    task_model = Combine_freeze_encoder( params,model.no_inner_model, learner, lr_model=model.lr_model)
                     with torch.cuda.amp.autocast(enabled=bool(params.amp), dtype=torch.bfloat16):
                         output_dict = task_model(
                             "fwd",
@@ -1081,14 +1114,6 @@ class Trainer(object):
                             symbol_input=dict_query["symbol_input"],
                             symbol_padding_mask=dict_query["symbol_mask"],
                         )
-                        # output_dict = learner(
-                        #     "fwd",
-                        #     data_input=dict_query["data_input"],
-                        #     input_times=dict_query["input_times"][..., None],
-                        #     output_times=dict_query["output_times"][..., None],
-                        #     symbol_encoded=output_noinner["symbol_encoded"],
-                        #     symbol_padding_mask=dict_query["symbol_mask"],
-                        # )  # (bs, output_len, x_num, data_dim)
                         query_data_loss += self.data_loss_fn(output_dict["data_output"], dict_query["data_label"],
                                                              dict_query["data_mask"],
                                                              dict_query["loss_weight"])
@@ -1100,69 +1125,3 @@ class Trainer(object):
             self.optimizer.zero_grad()
             self.optimize(query_data_loss)
 
-    # def freeze_meta_updates_symbol(self,model):
-    #     params = self.params
-    #     query_data_loss = to_cuda(torch.tensor(0.0).float())
-    #     if not self.params.model.meta.first_order:
-    #         backends = [torch.nn.attention.SDPBackend.MATH]
-    #     else:
-    #         backends = [torch.nn.attention.SDPBackend.MATH,
-    #                     torch.nn.attention.SDPBackend.EFFICIENT_ATTENTION,
-    #                     torch.nn.attention.SDPBackend.FLASH_ATTENTION]
-    #
-    #     with torch.nn.attention.sdpa_kernel(backends):
-    #         for ii in range(params.batch_size):
-    #             samples_support, samples_query = self.get_task()
-    #             dict_support = self.prepare_data(
-    #                 samples_support
-    #             )
-    #             dict_query = self.prepare_data(
-    #                 samples_query
-    #             )
-    #             learner = model.inner_model.clone()
-    #             learner = to_cuda(learner)
-    #             output_noinner = model.no_inner_model(
-    #                 "fwd",
-    #                 symbol_input=dict_support["symbol_input"],
-    #                 symbol_padding_mask=dict_support["symbol_mask"]
-    #             )
-    #
-    #             for _ in range(params.meta_step):
-    #                 with torch.cuda.amp.autocast(enabled=bool(params.amp), dtype=torch.bfloat16):
-    #                     output_dict = learner(
-    #                         "fwd",
-    #                         data_input=dict_support["data_input"],
-    #                         input_times=dict_support["input_times"][..., None],
-    #                         output_times=dict_support["output_times"][..., None],
-    #                         symbol_encoded=output_noinner["symbol_encoded"],
-    #                         symbol_padding_mask=dict_support["symbol_mask"],
-    #                     )
-    #                     data_output = output_dict["data_output"]
-    #                     support_data_loss = self.data_loss_fn(data_output, dict_support["data_label"],
-    #                                                           dict_support["data_mask"],
-    #                                                           dict_support["loss_weight"])
-    #                     learner.adapt(support_data_loss)
-    #             learner.eval()
-    #             output_noinner = model.no_inner_model( "fwd",
-    #                                                    symbol_input=dict_query["symbol_input"],
-    #                                                    symbol_padding_mask=dict_query["symbol_mask"]
-    #                                                    )
-    #             with torch.cuda.amp.autocast(enabled=bool(params.amp), dtype=torch.bfloat16):
-    #                 output_dict = learner(
-    #                     "fwd",
-    #                     data_input=dict_query["data_input"],
-    #                     input_times=dict_query["input_times"][..., None],
-    #                     output_times=dict_query["output_times"][..., None],
-    #                     symbol_encoded=output_noinner["symbol_encoded"],
-    #                     symbol_padding_mask=dict_query["symbol_mask"],
-    #                 )  # (bs, output_len, x_num, data_dim)
-    #                 data_output = output_dict["data_output"]
-    #                 query_data_loss += self.data_loss_fn(data_output, dict_query["data_label"],
-    #                                                      dict_query["data_mask"],
-    #                                                      dict_query["loss_weight"])
-    #
-    #         query_data_loss /= params.batch_size
-    #         self.data_loss += query_data_loss.item()
-    #         # optimize
-    #         self.optimizer.zero_grad()
-    #         self.optimize(query_data_loss)

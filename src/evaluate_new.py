@@ -118,11 +118,11 @@ class Evaluator(object):
             for idx, samples in enumerate(loader):
                 bs = len(samples["data"])
                 eval_size += bs if self.params.zero_shot_only else bs - self.params.data.num_support
-
+                num = bs - self.params.data.num_support if self.params.meta else bs
                 total_samples = bs
-                random_indices = self.datasets[type].rng.permutation(total_samples)
-                support_indices = random_indices[:self.params.data.num_support]
-                query_indices = random_indices[
+                indices = np.arange(total_samples)
+                support_indices = indices[:self.params.data.num_support]
+                query_indices = indices[
                                 self.params.data.num_support:]
                 if not self.params.zero_shot_only:
                     samples_support = {}
@@ -151,6 +151,8 @@ class Evaluator(object):
                                                         train=False) if self.params.model.name == "DeepONet" else self.trainer.prepare_data(
                             samples_query, train=False)
                     )
+                    if params.print_outputs:
+                        logger.info("{}: {}   {}\n".format(type, idx,dict_query["tree_structure"][0]))
                 else:
 
                     dict_support = {}
@@ -176,8 +178,6 @@ class Evaluator(object):
                         )  # (bs, output_len, x_num, data_dim)
                         output_start = self.params.data.input_len if self.params.data.output_start_eval is None else self.params.data.output_start_eval
                         num_output_t = (params.data.t_num - output_start + 1) // self.params.data.output_step
-                        num = bs - self.params.data.num_support if self.params.meta else bs
-                        print()
                         data_output_zero_shot = output.reshape(num, num_output_t, params.data.x_num, 1)
                 elif self.params.model.name == "FNO":
                     data_output_zero_shot = model(
@@ -201,7 +201,7 @@ class Evaluator(object):
 
                 if not params.zero_shot_only:
                     if self.params.model.name == "DeepONet":
-                        learner = self.deeponet_adapt(model,dict_support)
+                        learner, lr = self.deeponet_adapt(model,dict_support)
                         with torch.cuda.amp.autocast(enabled=bool(params.amp), dtype=torch.bfloat16):
                             output = learner(
                                 querypoint=dict_query["query_tensor_reshaped"],
@@ -213,13 +213,13 @@ class Evaluator(object):
 
                     elif self.params.model.name == "FNO":
 
-                        learner = self.fno_adapt(model,dict_support)
+                        learner, lr = self.fno_adapt(model,dict_support)
                         data_output_few_shot = learner(
                             dict_query["data_input"],
                         )  # (bs, output_len, x_num, data_dim
                     else:
 
-                        learner = self.freeze_symbol_adapt(model,dict_support) if self.params.model.name == "prose_freeze_symbol" else self.full_adapt(model,dict_support)
+                        learner, lr = self.freeze_symbol_adapt(model,dict_support) if self.params.model.name == "prose_freeze_symbol" else self.full_adapt(model,dict_support)
                         with torch.cuda.amp.autocast(enabled=bool(params.amp), dtype=torch.bfloat16):
                             output_dict_few_shot = learner(
                                 "generate",
@@ -236,6 +236,12 @@ class Evaluator(object):
                     data_loss_few_shot = data_loss_fn(data_output_few_shot, data_label, dict_query["data_mask"], dict_query["loss_weight"])
 
                     results["data_loss_few_shot"].extend(data_loss_few_shot)
+                    if  params.use_wandb:
+                        wandb.log(
+                            {"val": {"epoch": self.trainer.epoch,
+                                     f"{type}_{idx}_lr": lr}}
+                        )
+
                 else:
                     data_output_few_shot = None
 
@@ -273,43 +279,46 @@ class Evaluator(object):
                         results[keys].append(cur_result_zero_shot[k])
                     else:
                         results[keys].extend(cur_result_zero_shot[k])
-                if params.print_outputs:
-                    # plot all outputs
-                    if not params.zero_shot_only:
-                        data_output_few_shot = data_output_few_shot.float().numpy(
-                            force=True)  # (bs, output_len//output_step, x_num,data_dim)
-                    else:
-                        data_output_few_shot = None
+                # if params.print_outputs:
+                #     # plot all outputs
+                #     if not params.zero_shot_only:
+                #         data_output_few_shot = data_output_few_shot.float().numpy(
+                #             force=True)  # (bs, output_len//output_step, x_num,data_dim)
+                #     else:
+                #         data_output_few_shot = None
+                #
+                #     data_output_zero_shot = data_output_zero_shot.float().numpy(
+                #         force=True)  # (bs, output_len//output_step, x_num,data_dim)
+                #     # data_all = samples["data"].numpy(
+                #     #     force=True)  # (bs, input_len + output_len, x_num,  data_dim)
+                #     for i in range(num):
+                #         if not params.zero_shot_only:
+                #             index = idx * bs + i + self.params.data.num_support
+                #             plot_title = "Type {} | Idx {} | zero {:.4f} | few {:.4f}".format(type, index,
+                #                                                         cur_result_zero_shot["_l2_error"][i],  cur_result_few_shot["_l2_error"][i])
+                #         else:
+                #             index = idx * params.batch_size_eval + i
+                #             plot_title = "Type {} | Idx {} | zero {:.4f}".format(type,index,cur_result_zero_shot["_l2_error"][i])
+                #
+                #
+                #         plot_1d_pde(
+                #             data_output_zero_shot[i],
+                #             data_output_few_shot[i] if data_output_few_shot is not None else None,
+                #             samples["t"][i],
+                #             samples["x"][i],
+                #             data_all[i],
+                #             params.data.input_len,
+                #             plot_title,
+                #             filename=f"{type}_plot_{index}",
+                #             folder=save_folder,
+                #             dim=(params.data[type.split("%")[0]]).dim,
+                #             input_step = params.data.input_step,
+                #             output_step = params.data.output_step,
+                #             output_start =  params.data.input_len if params.data.output_start_eval is None else params.data.output_start_eval
+                #         )
 
-                    data_output_zero_shot = data_output_zero_shot.float().numpy(
-                        force=True)  # (bs, output_len//output_step, x_num,data_dim)
-                    data_all = samples["data"].numpy(
-                        force=True)  # (bs, input_len + output_len, x_num,  data_dim)
-                    for i in range(bs):
-                        index = idx * params.batch_size_eval + i
-                        if not params.zero_shot_only:
-                            plot_title = "Type {} | Idx {} | zero {:.4f} | few {:.4f}".format(type, index,
-                                                                        cur_result_zero_shot["_l2_error"][i],  cur_result_few_shot["_l2_error"][i])
-                        else:
-                            plot_title = "Type {} | Idx {} | zero {:.4f}".format(type,index,cur_result_zero_shot["_l2_error"][i])
 
-
-                        plot_1d_pde(
-                            data_loss_zero_shot[i],
-                            data_loss_few_shot[i] if data_loss_few_shot is not None else None,
-                            samples["t"][i],
-                            samples["x"][i],
-                            data_all[i],
-                            params.data.input_len,
-                            plot_title,
-                            filename=f"{type}_plot_{index}",
-                            folder=save_folder,
-                            dim=(params.data[type.split("%")[0]]).dim,
-                            input_step = params.data.input_step,
-                            output_step = params.data.output_step,
-                            output_start =  params.data.input_len if params.data.output_start_eval is None else params.data.output_start_eval
-                        )
-
+                data_all = samples["data"].numpy(force=True)
                 if params.log_eval_plots > 0 and num_plotted < params.log_eval_plots:
                     # only plot the first element
                     if (isinstance(data_output_few_shot, np.ndarray)  or (data_output_few_shot is None and params.zero_shot_only) )and isinstance(data_output_zero_shot, np.ndarray):
@@ -355,6 +364,10 @@ class Evaluator(object):
                             {"val": {"epoch": self.trainer.epoch,
                                      f"{type}_plot_{num_plotted}": wandb.Image(path)}}
                         )
+                        # if not params.zero_shot_only:
+                        #     wandb.log(
+                        #         {"val": {f"{type}_lr": lr}}
+                        #     )
 
                     num_plotted += 1
 
@@ -487,7 +500,7 @@ class Evaluator(object):
                                                                   "loss_weight"])
                 learner.adapt(support_data_loss, lr=self.params.model.meta.meta_lr)
 
-        return learner
+        return learner, self.params.model.meta.meta_lr
 
     def freeze_symbol_adapt(self,model, support_dict):
         params = self.params
@@ -508,6 +521,20 @@ class Evaluator(object):
             # input_times= dict_support["input_times"][..., None],
             symbol_input=support_dict["symbol_input"],
             symbol_padding_mask=support_dict["symbol_mask"], )
+        if not model.learnable_lr:
+            symbol_encoded = output_noinner["symbol_encoded"]
+
+            lr = self.params.model.meta.meta_lr
+        else:
+            symbol_encoded = None
+            if params.model.meta.name == "MAML":
+                single_lr = True
+            else:
+                single_lr = False
+            A = output_noinner["symbol_encoded"]
+            B = output_noinner["symbol_encoded"][0]
+            lr = model.lr_model(B, single_lr=single_lr)
+
         for _ in range(params.meta_step_eval):
             with torch.cuda.amp.autocast(enabled=bool(params.amp),
                                          dtype=torch.bfloat16):
@@ -516,7 +543,7 @@ class Evaluator(object):
                     data_input=support_dict["data_input"],
                     input_times= support_dict["input_times"][..., None],
                     output_times=support_dict["output_times"][..., None],
-                    symbol_encoded=output_noinner["symbol_encoded"],
+                    symbol_encoded=symbol_encoded,
                     symbol_padding_mask=support_dict["symbol_mask"],
                 )
                 data_output = output_dict["data_output"]
@@ -527,17 +554,34 @@ class Evaluator(object):
                                                                   "data_mask"],
                                                               support_dict[
                                                                   "loss_weight"])
-                learner.adapt(support_data_loss, lr=self.params.model.meta.meta_lr)
+                learner.adapt(support_data_loss, lr=lr)
 
-        return  Combine_freeze_encoder( model.no_inner_model, learner)
+        return  Combine_freeze_encoder(params, model.no_inner_model, learner, lr_model=model.lr_model), lr
 
 
     def deeponet_adapt(self,model,dict_support):
         params = self.params
         num_inner_loops = params.num_adapt_eval
 
-        learner = model.clone()
-        learner = to_cuda(learner)
+        if self.params.model.meta.learnable_lr:
+            learner = model.inner_model.clone()
+            learner = to_cuda(learner)
+            output_noinner = model.no_inner_model(
+                "fwd",
+                symbol_input=dict_support["symbol_input"],
+                symbol_padding_mask=dict_support["symbol_mask"], )
+            if params.model.meta.name == "MAML":
+                single_lr = True
+            else:
+                single_lr = False
+            A = output_noinner["symbol_encoded"]
+            B = output_noinner["symbol_encoded"][0]
+
+            lr = model.lr_model(B, single_lr=single_lr)
+        else:
+            learner = model.clone()
+            learner = to_cuda(learner)
+            lr = self.params.model.meta.meta_lr
         learner.train()
         for _ in range(params.meta_step_eval):
             with torch.cuda.amp.autocast(enabled=bool(params.amp),
@@ -552,15 +596,32 @@ class Evaluator(object):
                 support_data_loss = self.trainer.data_loss_fn(data_output, dict_support["data_label"],
                                                       dict_support["data_mask"], dict_support["loss_weight"])
 
-            learner.adapt(support_data_loss, lr=self.params.model.meta.meta_lr)
-        return learner
+            learner.adapt(support_data_loss, lr=lr)
+        return learner, lr
+
     def fno_adapt(self,model,dict_support):
         params = self.params
         param_accumulator = None
         num_inner_loops = params.num_adapt_eval
+        if self.params.model.meta.learnable_lr:
+            learner = model.inner_model.clone()
+            learner = to_cuda(learner)
+            output_noinner = model.no_inner_model(
+                "fwd",
+                symbol_input=dict_support["symbol_input"],
+                symbol_padding_mask=dict_support["symbol_mask"], )
+            if params.model.meta.name == "MAML":
+                single_lr = True
+            else:
+                single_lr = False
+            A = output_noinner["symbol_encoded"]
+            B = output_noinner["symbol_encoded"][0]
 
-        learner = model.clone()
-        learner = to_cuda(learner)
+            lr = model.lr_model(B, single_lr=single_lr)
+        else:
+            learner = model.clone()
+            learner = to_cuda(learner)
+            lr = self.params.model.meta.meta_lr
         learner.train()
         for _ in range(params.meta_step_eval):
 
@@ -573,165 +634,6 @@ class Evaluator(object):
             support_data_loss = self.trainer.data_loss_fn(data_output, dict_support["data_label"],
                                                   dict_support["data_mask"], dict_support["loss_weight"])
 
-            learner.adapt(support_data_loss, lr=self.params.model.meta.meta_lr)
-        return learner
-    # def freeze_adapt_encoder(self,model,type):
-    #
-    #
-    #     params = self.params
-    #     param_accumulator = None
-    #     num_inner_loops = params.num_adapt_eval
-    #
-    #     for __ in range(num_inner_loops):
-    #         learner = model.inner_model.clone()
-    #         learner = to_cuda(learner)
-    #         learner.eval()
-    #         if params.data.diff_supp_query_type:
-    #             type_idx = params.data.eval_types_query.index(type)
-    #             type_support = params.data.eval_types_support[type_idx]
-    #             support_data = self.support_iter[type_support]
-    #         else:
-    #             try:
-    #                 support_data = next(self.support_iter[type])
-    #             except:
-    #                 # logger.info(f"Reached end of dataloader, restart {self.dataloader_count}...")
-    #                 self.support_iter[type] =  iter(DataLoader(
-    #                     self.support_datasets[type],
-    #                     batch_size=self.params.eval_support_size,
-    #                     num_workers=self.params.num_workers,
-    #                     # num_workers=1,
-    #                     # pin_memory=True,
-    #                     shuffle=True,
-    #                     collate_fn=custom_collate(self.params.data.max_output_dimension, self.symbol_env)
-    #                 ))
-    #                 support_data = next(self.support_iter[type])
-    #         support_dict = self.trainer.prepare_data(support_data, train=True)
-    #         output_noinner = model.no_inner_model(
-    #                     data_input= support_dict["data_input"],
-    #                     input_times= support_dict["input_times"][..., None],
-    #                     symbol_input=support_dict["symbol_input"],
-    #                     symbol_padding_mask=support_dict["symbol_mask"],)
-    #         with torch.cuda.amp.autocast(enabled=bool(params.amp),
-    #                                      dtype=torch.bfloat16):
-    #             adapt_before = learner(
-    #                 "fwd",
-    #                 output_times=support_dict["output_times"][..., None],
-    #                 embedder=model.no_inner_model.embedder,
-    #                 fused=output_noinner["fused"],
-    #                 fused_mask=output_noinner["fused_mask"]
-    #             )
-    #         learner.train()
-    #         for _ in range(params.meta_step):
-    #             with torch.cuda.amp.autocast(enabled=bool(params.amp),
-    #                                          dtype=torch.bfloat16):
-    #                 output_dict = learner(
-    #                     "fwd",
-    #                     output_times=support_dict["output_times"][..., None],
-    #                     embedder=model.no_inner_model.embedder,
-    #                     fused=output_noinner["fused"],
-    #                     fused_mask=output_noinner["fused_mask"]
-    #                 )
-    #                 data_output = output_dict["data_output"]
-    #                 support_data_loss = self.trainer.data_loss_fn(data_output,
-    #                                                               support_dict[
-    #                                                                   "data_label"],
-    #                                                               support_dict[
-    #                                                                   "data_mask"],
-    #                                                               support_dict[
-    #                                                                   "loss_weight"])
-    #                 learner.adapt(support_data_loss, lr=self.params.model.meta.meta_lr)
-    #         learner.eval()
-    #         adapt_after = learner(
-    #             "fwd",
-    #             output_times=support_dict["output_times"][..., None],
-    #             embedder=model.no_inner_model.embedder,
-    #             fused=output_noinner["fused"],
-    #             fused_mask=output_noinner["fused_mask"]
-    #         )
-    #         cca_dict = compare_parameters_with_similarity(adapt_before, adapt_after)
-    #         logger.info("cca similarity")
-    #         for key, value in cca_dict.items():
-    #             logger.info(f"{key}: {value}")
-    #
-    #         if param_accumulator is None:
-    #             param_accumulator = {name: torch.zeros_like(param) for name, param in
-    #                                  learner.named_parameters()}
-    #
-    #         for name, param in learner.named_parameters():
-    #             param_accumulator[name] += param.detach()
-    #
-    #     # Calculate mean of accumulated parameters
-    #     for name in param_accumulator:
-    #         param_accumulator[name] /= num_inner_loops
-    #
-    #     averaged_model = model.clone()
-    #     # Update model with mean parameters
-    #     for name, param in averaged_model.named_parameters():
-    #         param.data = param_accumulator[name]
-    #     return averaged_model
+            learner.adapt(support_data_loss, lr=lr)
+        return learner, lr
 
-    # def freeze_adapt_symbol(self,model,type):
-    #
-    #
-    #     params = self.params
-    #     learner = model.inner_model.clone()
-    #     learner = to_cuda(learner)
-    #     learner.eval()
-    #     support_data = self.support[type]
-    #     support_dict = self.trainer.prepare_data(support_data, train=True)
-    #     output_noinner = model.no_inner_model("fwd",
-    #                                           symbol_input=support_dict["symbol_input"],
-    #                                           symbol_padding_mask=support_dict["symbol_mask"])
-    #     with torch.cuda.amp.autocast(enabled=bool(params.amp),
-    #                                  dtype=torch.bfloat16):
-    #         adapt_before = learner(
-    #             "fwd",
-    #             data_input=support_dict["data_input"],
-    #             input_times=support_dict["input_times"][..., None],
-    #             output_times=support_dict["output_times"][..., None],
-    #             symbol_encoded=output_noinner["symbol_encoded"],
-    #             symbol_padding_mask=support_dict["symbol_mask"]
-    #         )
-    #     learner.train()
-    #     # inner_optimizer = torch.optim.SGD(learner.parameters(),
-    #     #                                   lr=params.model.meta.meta_lr)
-    #     for _ in range(params.meta_step):
-    #         with torch.cuda.amp.autocast(enabled=bool(params.amp),
-    #                                      dtype=torch.bfloat16):
-    #             output_dict = learner(
-    #             "fwd",
-    #             data_input=support_dict["data_input"],
-    #             input_times=support_dict["input_times"][..., None],
-    #             output_times=support_dict["output_times"][..., None],
-    #             symbol_encoded=output_noinner["symbol_encoded"],
-    #             symbol_padding_mask=support_dict["symbol_mask"]
-    #             )
-    #             data_output = output_dict["data_output"]
-    #             support_data_loss = self.trainer.data_loss_fn(data_output,
-    #                                                           support_dict[
-    #                                                               "data_label"],
-    #                                                           support_dict[
-    #                                                               "data_mask"],
-    #                                                           support_dict[
-    #                                                               "loss_weight"])
-    #             learner.adapt(support_data_loss,lr = self.params.model.meta.meta_lr_eval)
-    #             # learner.zero_grad()
-    #             # support_data_loss.backward(retain_graph= not self.params.model.meta.first_order)
-    #             # inner_optimizer.step()
-    #             # self.trainer.optimize(support_data_loss, optimizer=inner_optimizer,
-    #             #                       outer_loop=False)
-    #     learner.eval()
-    #     adapt_after = learner(
-    #             "fwd",
-    #             data_input=support_dict["data_input"],
-    #             input_times=support_dict["input_times"][..., None],
-    #             output_times=support_dict["output_times"][..., None],
-    #             symbol_encoded=output_noinner["symbol_encoded"],
-    #             symbol_padding_mask=support_dict["symbol_mask"]
-    #         )
-    #     cca_dict = compare_parameters_with_similarity(adapt_before, adapt_after)
-    #     logger.info("cca similarity")
-    #     for key, value in cca_dict.items():
-    #         logger.info(f"{key}: {value}")
-    #
-    #     return learner

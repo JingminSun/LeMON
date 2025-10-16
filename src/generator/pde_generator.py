@@ -3541,14 +3541,6 @@ class PDEGenerator(Generator):
         term_list.append(self.mul_terms([str(eps / np.pi), "uxx_0"]))
         op_list = [op_list]
         term_list = [term_list]
-        # op_list = [["sub", "sub"]]
-        # term_list = [
-        #     [
-        #         self.mul_terms([str(coeff), "ut_0"]),
-        #         Node("mul", p, [Node(str(k), p), Node("mul", p, [Node("sin", p, [Node("u_0", p)]), Node("ux_0", p)])]),
-        #         self.mul_terms([str(eps / np.pi), "uxx_0"]),
-        #     ]
-        # ]
 
         item["tree"] = self.tree_from_list(op_list, term_list)
 

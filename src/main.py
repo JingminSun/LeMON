@@ -133,12 +133,12 @@ def main(params: DictConfig):
             # except:
             #     r2_few_shot = "N/A"
             logger.info(
-                "Eval Few Shot| data loss = {:.8f} | rel l2 = {:.8f} | rel l2 1st_half = {:.8f} | rel l2 2nd_half = {:.8f} ".format(
+                "Eval Few Shot| data loss = {:.8f} | rel l2 = {:.8f} | rel l2 1st_half = {:.8f} | rel l2 2nd_half = {:.8f}| r2 = {:8f} ".format(
                     stats["data_loss_few_shot"],
                     stats["_l2_error_few_shot"],
                     stats["_l2_error_first_half_few_shot"],
                     stats["_l2_error_second_half_few_shot"],
-                    # stats["_r2_few_shot"]
+                    stats["_r2_few_shot"]
                 )
             )
 
@@ -212,8 +212,8 @@ def main(params: DictConfig):
                         k.strip("_"): v for k, v in results.items() if k in ["_l2_error_zero_shot", "data_loss_zero_shot","_l2_error_few_shot", "data_loss_few_shot"]
                     }
             wandb.log(wandb_log)
-
-        trainer.save_best_model(stats)
+        suffix=  "few_shot" if params.meta else  "zero_shot"
+        trainer.save_best_model(stats, suffix = suffix)
 
         trainer.end_epoch()
 

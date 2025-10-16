@@ -486,7 +486,11 @@ class MetaSGD(MetaLearner):
             else:
                 gradient = None
             gradients.append(gradient)
-        self.module = self.meta_sgd_update(self.module, self.lrs, gradients)
+        if lr is None:
+            lrs = self.lrs
+        else:
+            lrs = lr
+        self.module = self.meta_sgd_update(self.module, lrs, gradients)
 
     def meta_sgd_update(self,model, lrs=None, grads=None):
         """
@@ -543,41 +547,75 @@ class MetaSGD(MetaLearner):
         return model
 
 
-# if __name__ == '__main__':
-#     import numpy as np
-#     from torch import optim
-#
-#     simple_model = nn.Linear(20,10)
-#     meta_model = MAML(simple_model, lr = 0.1)
-#
-#     meta_lr = 0.09
-#     X = torch.from_numpy(np.random.randn(100,20)).float()
-#     y = torch.from_numpy(np.random.randn(100,10)).float()
-#     opt = optim.Adam(meta_model.parameters(), meta_lr)
-#
-#     num_iteration = 10
-#     num_task = 10
-#     num_updates = 5
-#
-#     for i in range(num_iteration):
-#         error = 0
-#         for j in range(num_task):
-#             learner = meta_model.clone()
-#             X_this = X[i * 10:(i + 1) * 10, :]
-#             y_this = y[i * 10:(i + 1) * 10, :]
-#             for _ in range(num_updates):
-#                 error = torch.sum((learner(X_this[:8,:])-y_this[:8,:])**2)
-#                 learner.adapt(error)
-#             valid_error = (learner(X_this[8:,:])-y_this[8:,:]).detach().numpy()
-#             valid_error = np.linalg.norm(valid_error)/ np.linalg.norm((y_this[8:,:]).detach().numpy())
-#             valid_error/=2
-#             error += valid_error
-#         error/=num_task
-#
-#         opt.zero_grad()
-#         error.backward()
-#         opt.step()
-#     print(error)
+class LearningRateModel(nn.Module):
+    def __init__(self, model_parameters, input_dim, hidden_dim=128, max_value = 1, method = "mean"):
+        """
+        A model to learn task-specific learning rates.
+        - model_parameters: List of parameters of the main model.
+        - input_dim: Dimensionality of the input features to predict learning rates.
+        - hidden_dim: Number of hidden units in the LR prediction network.
+        """
+        super(LearningRateModel, self).__init__()
+        self.model_parameters = list(model_parameters)
+
+        # Neural network to predict learning rates
+        self.lr_predictor = nn.Sequential(
+            nn.Linear(input_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, 1),  # Predict a single LR per parameter
+            # nn.Softplus()
+        )
+        self.max_value = max_value
+        self.method = method
+
+    def forward(self, inputs, single_lr=True):
+        """
+        Predict learning rates based on inputs.
+        - inputs: Tensor of input features.
+        Returns:
+        - lrs: A list of tensors, one per parameter, containing the predicted LRs.
+            or
+        - lr: A single lr for all parameters
+        """
+        if single_lr:
+            lr = self.lr_predictor(inputs)
+            if self.method == "mean":
+                lr = torch.mean(lr)
+            elif self.method == "energy_aggregation":
+                weights = nn.Softmax(dim=0)(lr)
+                lr = torch.sum(weights * lr, dim=0)
+            elif self.method =="variance_based_weight":
+                variance = torch.var(lr, dim=0)
+                weights = variance / variance.sum()
+                lr = torch.sum(weights * lr, dim=0)
+            else:
+                raise NotImplementedError(f"The aggregation method {self.method} is not implemented")
+            return torch.sigmoid(lr) * self.max_value
+
+        else:
+        ######Not Done, it seems all parameters consist of the same lr
+            lrs = []
+            for _ in self.model_parameters:
+                # Generate input features (e.g., parameter values, gradients, or task-specific inputs)
+                # features = inputs[param]  # Example: {param: torch.Tensor([...])}
+                lr = self.lr_predictor(inputs)
+                if self.method == "mean":
+                    lr = torch.mean(lr)
+                elif self.method == "energy_aggregation":
+                    weights = nn.Softmax(dim=0)(lr)
+                    lr = torch.sum(weights * lr, dim=0)
+                elif self.method == "variance_based_weight":
+                    variance = torch.var(lr, dim=0)
+                    weights = variance / variance.sum()
+                    lr = torch.sum(weights * lr, dim=0)
+                else:
+                    raise NotImplementedError(
+                        f"The aggregation method {self.method} is not implemented")
+                lr = torch.sigmoid(lr) * self.max_value
+                lrs.append(lr)
+            return lrs
 
 
 if __name__ == '__main__':

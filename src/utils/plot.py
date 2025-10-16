@@ -145,4 +145,42 @@ def plot_1d_pde(
     path = os.path.join(folder, filename + ".png")
     plt.savefig(path)
     plt.close(fig)
+
+    fig2, axs2 = plt.subplots(2 if output_2 is not None else 1, dim,
+                              figsize=(5.5 , 4.5 * (2 if output_2 is not None else 1)))
+    num_x_ticks = 10
+    num_y_ticks = 5
+    if len(axs2.shape) == 1:
+        axs2 = axs2.reshape(-1, dim)
+    data = output_1[..., 0]
+    im = axs2[0, 0].imshow(data, aspect='auto')
+    x_tick_positions = np.linspace(0, data.shape[1] - 1, num=num_x_ticks, dtype=int)
+    y_tick_positions = np.linspace(0, data.shape[0] - 1, num=num_y_ticks, dtype=int)
+    x_tick_labels = [f"{coords[idx]:.2f}" for idx in x_tick_positions]
+    y_tick_labels = [ f"{output_time[idx]:.2f}" for idx in y_tick_positions]
+
+    axs2[0, 0].set_xticks(x_tick_positions)
+    axs2[0, 0].set_xticklabels(x_tick_labels)
+    axs2[0, 0].set_yticks(y_tick_positions)
+    axs2[0, 0].set_yticklabels(y_tick_labels)
+    plt.colorbar(im, ax=axs2[0, 0])
+    if output_2 is not None:
+        im = axs2[1, 0].imshow(output_2[..., 0], aspect='auto')
+        x_tick_positions = np.linspace(0, data.shape[1] - 1, num=num_x_ticks, dtype=int)
+        y_tick_positions = np.linspace(0, data.shape[0] - 1, num=num_y_ticks, dtype=int)
+        x_tick_labels = [f"{coords[idx]:.2f}" for idx in x_tick_positions]
+        y_tick_labels = [f"{output_time[idx]:.2f}" for idx in y_tick_positions]
+
+        axs2[1, 0].set_xticks(x_tick_positions)
+        axs2[1, 0].set_xticklabels(x_tick_labels)
+        axs2[1, 0].set_yticks(y_tick_positions)
+        axs2[1, 0].set_yticklabels(y_tick_labels)
+
+        plt.colorbar(im, ax=axs2[1, 0])
+        # plt.colorbar(axs2[1, 0])
+
+    plt.tight_layout()
+    path2 = os.path.join(folder, filename + "_zero_few_shot.png")
+    plt.savefig(path2)
+    plt.close(fig2)
     return path
