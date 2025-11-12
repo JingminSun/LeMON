@@ -1,7 +1,7 @@
 # LeMON:  Learning to Learn Multi-Operator Networks
 
 
-## Data Generation: See detailed instruction in [gen_data.sh](script/gen_data.sh)
+## Data Generation: See detailed instruction in [gen_data.sh](scripts/gen_data.sh)
     bash scripts/gen_data.sh
 
 
