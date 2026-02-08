@@ -54,3 +54,15 @@ However, if you want to save space/ your evaluation dataset and training dataset
 LeMON code is based on [learn2learn library](https://github.com/learnables/learn2learn/).
 
     bash scripts/learnable_lr.sh
+
+
+## Citation
+If you find our paper and code useful, please consider citing:
+```
+@article{sun2024lemon,
+  title={Lemon: Learning to learn multi-operator networks},
+  author={Sun, Jingmin and Zhang, Zecheng and Schaeffer, Hayden},
+  journal={arXiv preprint arXiv:2408.16168},
+  year={2024}
+}
+```
